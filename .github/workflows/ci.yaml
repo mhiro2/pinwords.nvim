@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Run StyLua check
+        uses: JohnnyMorganz/stylua-action@479972f01e665acfcba96ada452c36608bdbbb5e # v4.1.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          version: latest
+          args: --check .
+      - name: Install selene
+        run: |
+          wget "https://github.com/Kampfkarren/selene/releases/download/${SELENE_VERSION}/selene-${SELENE_VERSION}-linux.zip"
+          echo "$SHA256_CHECKSUM  selene-${SELENE_VERSION}-linux.zip" > "selene-${SELENE_VERSION}-linux.zip.checksum"
+          sha256sum --check "selene-${SELENE_VERSION}-linux.zip.checksum"
+          unzip "selene-${SELENE_VERSION}-linux.zip"
+          install -Dp selene "$HOME/.local/bin/selene"
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+        env:
+          SELENE_VERSION: "0.29.0"
+          SHA256_CHECKSUM: "e2510f91826373dafb77e741b2df826ecfe4b94dfb20f8939809773ee4d53b6d"
+      - name: Run Selene
+        run: make selene
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        nvim_version:
+          - stable
+          - nightly
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Set up Neovim
+        uses: rhysd/action-setup-vim@19e3dd31a84dbc2c5445d65e9b363f616cab96c1 # v1.6.0
+        with:
+          neovim: true
+          version: ${{ matrix.nvim_version }}
+      - name: Run tests
+        run: make test

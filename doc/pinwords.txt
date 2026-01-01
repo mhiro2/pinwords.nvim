@@ -1,0 +1,76 @@
+*pinwords*  Pin words you want to keep in your head.
+
+==============================================================================
+PINWORDS                                                      *pinwords.nvim*
+
+Pin words to keep them visible while reading or reviewing code.
+
+REQUIREMENTS
+  - Neovim >= 0.9
+
+SETUP                                                           *pinwords-setup*
+
+  require("pinwords").setup({
+    slots = 9,
+    whole_word = true,
+    case_sensitive = false,
+    auto_allocation = {
+      strategy = "first_empty", -- "first_empty" | "cycle" | "lru"
+      on_full = "replace_oldest", -- "replace_oldest" | "replace_last" | "no_op"
+      toggle_same = true,
+    },
+  })
+
+PERSISTENCE                                                *pinwords-persistence*
+
+  Highlights remain until you clear them (they do not disappear automatically).
+  Pins are buffer-local and are not saved across Neovim sessions.
+
+AUTO ALLOCATION                                          *pinwords-auto-allocation*
+
+  strategy:
+    first_empty  Use the lowest available slot.
+    cycle        Rotate slots sequentially; uses 'on_full' when full.
+    lru          Replace least-recently used when full.
+
+  on_full:
+    replace_oldest  Replace the oldest pinned slot.
+    replace_last    Replace the most recently pinned slot.
+    no_op           Do nothing when full.
+
+  toggle_same:
+    true   If the same pattern exists, unpin it (toggle off).
+    false  Always allocate a new slot (or replace based on policy).
+
+  Notes ~
+    - 'on_full' is used only with strategy=first_empty/cycle.
+    - With strategy=lru, a slot is always selected; 'on_full' is ignored.
+
+COMMANDS                                                       *pinwords-commands*
+
+  :PinWord              Auto pin (toggle same). Visual range pins selection.
+  :PinWord {slot}        Pin word under cursor (visual range pins selection).
+  :UnpinWord             Unpin word under cursor.
+  :UnpinWord {slot}      Clear slot.
+  :UnpinAllWords         Clear all.
+  :PinWordList           List active pins.
+  :PinWordCwordToggle    Toggle cursor-word highlight (current window, incl. insert).
+
+API                                                             *pinwords-api*
+
+  require("pinwords").set()         -- auto allocation
+  require("pinwords").set(slot)
+  require("pinwords").toggle()      -- alias for auto set
+  require("pinwords").cword_toggle() -- toggle cursor-word highlight
+  require("pinwords").unpin()       -- unpin word under cursor
+  require("pinwords").clear(slot)
+  require("pinwords").clear_all()
+  require("pinwords").list()
+
+HIGHLIGHTS                                                     *pinwords-highlights*
+
+  PinWord1 .. PinWord9
+  PinWordCword
+
+==============================================================================
+vim:tw=78:et:ft=help
