@@ -19,6 +19,9 @@ Unlike navigation-oriented word highlighters, pinwords lets you **explicitly mar
 - ⚡ Pure **Neovim native API** (Lua-only, no Vim script)
 - 🧩 Clean internal design for future extensions
 
+![movie](https://github.com/user-attachments/assets/5b65e319-f309-4f15-b6ff-806c0148cab6)
+
+
 ## 🧠 Philosophy
 
 Many word-highlighting plugins focus on *navigation*.
@@ -51,8 +54,7 @@ Using lazy.nvim:
     pinwords.setup()
 
     -- Auto pin/unpin word under cursor (auto allocation)
-    map("n", "<leader>p", pinwords.set, { desc = "Pin word" })
-    map("n", "<leader>P", pinwords.unpin, { desc = "Unpin word" })
+    map("n", "<leader>p", pinwords.set, { desc = "Pin word toggle" })
 
     -- Pin selected text in visual mode
     map("x", "<leader>p", ":PinWord<cr>", { desc = "Pin selection" })
