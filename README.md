@@ -13,7 +13,7 @@ Unlike navigation-oriented word highlighters, pinwords lets you **explicitly mar
 
 - 🔢 **Slot-based highlights** (default: 1–9)
 - 🧷 **Auto allocation** for single-key pinning
-- 📌 **Persistent** highlights (until cleared; buffer-local, not saved across sessions)
+- 📌 **Persistent** highlights (until cleared; global across all buffers, not saved across sessions)
 - 🧠 Designed for **thinking, reading, and reviewing**, not navigation
 - 🪟 Correct behavior across **split windows**
 - ⚡ Pure **Neovim native API** (Lua-only, no Vim script)
@@ -44,7 +44,6 @@ Using lazy.nvim:
 ```lua
 {
   "mhiro2/pinwords.nvim",
-  version = "0.1.0",
   event = "VeryLazy",
   config = function()
     local pinwords = require("pinwords")

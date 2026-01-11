@@ -18,6 +18,17 @@
 ---@field match_id? integer
 ---@field pattern? string
 
+---@class PinwordsGlobalState
+---@field slots table<integer, PinwordsSlot>
+---@field order? integer[]
+---@field last_used? table<integer, integer>
+---@field tick? integer
+
+---@type PinwordsGlobalState
+local global_state = {
+  slots = {},
+}
+
 local M = {}
 
 ---@param list integer[]
@@ -30,68 +41,67 @@ local function remove_value(list, value)
   end
 end
 
----@param buf integer
----@return PinwordsBufState
-local function ensure_buf_state(buf)
-  local ok, state = pcall(vim.api.nvim_buf_get_var, buf, "pinwords")
-  if not ok or type(state) ~= "table" then
-    state = { slots = {} }
-    vim.api.nvim_buf_set_var(buf, "pinwords", state)
-  end
-
-  if type(state.slots) ~= "table" then
-    state.slots = {}
-    vim.api.nvim_buf_set_var(buf, "pinwords", state)
-  end
-
-  return state
+local function sync_global_state()
+  vim.api.nvim_set_var("pinwords_global", global_state)
 end
 
----@param buf integer
----@param max_slots integer
----@return nil
-function M.prune_buf_state(buf, max_slots)
-  if type(max_slots) ~= "number" then
-    return
+-- Initialize global state from vim.g or create new
+function M.init_global_state()
+  local ok, saved = pcall(vim.api.nvim_get_var, "pinwords_global")
+  if ok and type(saved) == "table" then
+    global_state = saved
+  else
+    global_state = { slots = {} }
   end
 
-  local ok, state = pcall(vim.api.nvim_buf_get_var, buf, "pinwords")
-  if not ok or type(state) ~= "table" then
+  if type(global_state.slots) ~= "table" then
+    global_state.slots = {}
+  end
+end
+
+---@param field table
+---@param max_slots integer
+---@return boolean
+local function prune_table_slots(field, max_slots)
+  local changed = false
+  for slot in pairs(field) do
+    if type(slot) == "number" and slot > max_slots then
+      field[slot] = nil
+      changed = true
+    end
+  end
+  return changed
+end
+
+---@param max_slots integer
+---@return nil
+function M.prune_global_state(max_slots)
+  if type(max_slots) ~= "number" then
     return
   end
 
   local changed = false
 
-  if type(state.slots) == "table" then
-    for slot in pairs(state.slots) do
+  if type(global_state.slots) == "table" then
+    changed = prune_table_slots(global_state.slots, max_slots) or changed
+  end
+
+  if type(global_state.order) == "table" then
+    for i = #global_state.order, 1, -1 do
+      local slot = global_state.order[i]
       if type(slot) == "number" and slot > max_slots then
-        state.slots[slot] = nil
+        table.remove(global_state.order, i)
         changed = true
       end
     end
   end
 
-  if type(state.order) == "table" then
-    for i = #state.order, 1, -1 do
-      local slot = state.order[i]
-      if type(slot) == "number" and slot > max_slots then
-        table.remove(state.order, i)
-        changed = true
-      end
-    end
-  end
-
-  if type(state.last_used) == "table" then
-    for slot in pairs(state.last_used) do
-      if type(slot) == "number" and slot > max_slots then
-        state.last_used[slot] = nil
-        changed = true
-      end
-    end
+  if type(global_state.last_used) == "table" then
+    changed = prune_table_slots(global_state.last_used, max_slots) or changed
   end
 
   if changed then
-    vim.api.nvim_buf_set_var(buf, "pinwords", state)
+    sync_global_state()
   end
 end
 
@@ -136,108 +146,96 @@ end
 ---@return PinwordsWinState
 local function ensure_win_state(win)
   local ok, state = pcall(vim.api.nvim_win_get_var, win, "pinwords")
+  local needs_update = false
+
   if not ok or type(state) ~= "table" then
     state = { match_ids = {}, cword = { enabled = false } }
-    vim.api.nvim_win_set_var(win, "pinwords", state)
+    needs_update = true
   end
 
   if type(state.match_ids) ~= "table" then
     state.match_ids = {}
-    vim.api.nvim_win_set_var(win, "pinwords", state)
+    needs_update = true
   end
 
   if type(state.cword) ~= "table" then
     state.cword = { enabled = false }
-    vim.api.nvim_win_set_var(win, "pinwords", state)
+    needs_update = true
   end
 
   if state.cword.enabled == nil then
     state.cword.enabled = false
+    needs_update = true
+  end
+
+  if needs_update then
     vim.api.nvim_win_set_var(win, "pinwords", state)
   end
 
   return state
 end
 
----@param buf integer
 ---@return table<integer, PinwordsSlot>
-function M.get_slots(buf)
-  local state = ensure_buf_state(buf)
-  return state.slots
+function M.get_slots()
+  return global_state.slots
 end
 
----@param buf integer
 ---@param slots table<integer, PinwordsSlot>
 ---@return nil
-function M.set_slots(buf, slots)
-  local state = ensure_buf_state(buf)
-  state.slots = slots
-  vim.api.nvim_buf_set_var(buf, "pinwords", state)
+function M.set_slots(slots)
+  global_state.slots = slots
+  sync_global_state()
 end
 
----@param buf integer
 ---@param slot integer
 ---@return nil
-function M.touch_slot(buf, slot)
-  local state = ensure_buf_state(buf)
-  local order = ensure_order(state)
+function M.touch_slot(slot)
+  local order = ensure_order(global_state)
   remove_value(order, slot)
   table.insert(order, slot)
 
-  local last_used = ensure_last_used(state)
-  local tick = ensure_tick(state) + 1
-  state.tick = tick
+  local last_used = ensure_last_used(global_state)
+  local tick = ensure_tick(global_state) + 1
+  global_state.tick = tick
   last_used[slot] = tick
 
-  vim.api.nvim_buf_set_var(buf, "pinwords", state)
+  sync_global_state()
 end
 
----@param buf integer
 ---@param slot integer
 ---@param entry PinwordsSlot
 ---@return nil
-function M.set_slot(buf, slot, entry)
-  local state = ensure_buf_state(buf)
-  state.slots[slot] = entry
-  vim.api.nvim_buf_set_var(buf, "pinwords", state)
+function M.set_slot(slot, entry)
+  global_state.slots[slot] = entry
+  sync_global_state()
 end
 
----@param buf integer
 ---@param slot integer
 ---@return nil
-function M.clear_slot(buf, slot)
-  local state = ensure_buf_state(buf)
-  state.slots[slot] = nil
-  if type(state.order) == "table" then
-    remove_value(state.order, slot)
+function M.clear_slot(slot)
+  global_state.slots[slot] = nil
+  if type(global_state.order) == "table" then
+    remove_value(global_state.order, slot)
   end
-  if type(state.last_used) == "table" then
-    state.last_used[slot] = nil
+  if type(global_state.last_used) == "table" then
+    global_state.last_used[slot] = nil
   end
-  vim.api.nvim_buf_set_var(buf, "pinwords", state)
+  sync_global_state()
 end
 
----@param buf integer
 ---@return nil
-function M.clear_all(buf)
-  local state = ensure_buf_state(buf)
-  state.slots = {}
-  if type(state.order) == "table" then
-    state.order = {}
-  end
-  if type(state.last_used) == "table" then
-    state.last_used = {}
-  end
-  state.tick = 0
-  vim.api.nvim_buf_set_var(buf, "pinwords", state)
+function M.clear_all()
+  global_state.slots = {}
+  global_state.order = {}
+  global_state.last_used = {}
+  global_state.tick = 0
+  sync_global_state()
 end
 
----@param buf integer
 ---@param raw_or_pattern string
 ---@return integer|nil
-function M.find_slot_by_raw_or_pattern(buf, raw_or_pattern)
-  local state = ensure_buf_state(buf)
-  for slot, entry in pairs(state.slots) do
+function M.find_slot_by_raw_or_pattern(raw_or_pattern)
+  for slot, entry in pairs(global_state.slots) do
     if entry.raw == raw_or_pattern or entry.pattern == raw_or_pattern then
       return slot
     end
@@ -250,88 +248,98 @@ end
 ---@deprecated
 M.find_slot_by_pattern = M.find_slot_by_raw_or_pattern
 
----@param buf integer
+---@param max_slots integer
+---@return integer|nil
+local function find_first_empty_slot(max_slots)
+  local slots = global_state.slots
+  for slot = 1, max_slots do
+    if slots[slot] == nil then
+      return slot
+    end
+  end
+  return nil
+end
+
+---@param max_slots integer
+---@return integer|nil
+local function find_cycle_slot(max_slots)
+  local order = global_state.order
+  local last_slot = type(order) == "table" and order[#order] or nil
+  if not last_slot then
+    return find_first_empty_slot(max_slots)
+  end
+
+  local slots = global_state.slots
+  for offset = 1, max_slots do
+    local slot = ((last_slot + offset - 1) % max_slots) + 1
+    if slots[slot] == nil then
+      return slot
+    end
+  end
+  return nil
+end
+
+---@param max_slots integer
+---@return integer|nil
+local function find_lru_slot(max_slots)
+  local empty = find_first_empty_slot(max_slots)
+  if empty then
+    return empty
+  end
+
+  local slots = global_state.slots
+  local last_used = global_state.last_used
+  if type(last_used) == "table" then
+    local oldest_slot
+    local oldest_time
+    for slot in pairs(slots) do
+      local ts = last_used[slot] or 0
+      if not oldest_time or ts < oldest_time then
+        oldest_time = ts
+        oldest_slot = slot
+      end
+    end
+    if oldest_slot then
+      return oldest_slot
+    end
+  end
+
+  local order = global_state.order
+  if type(order) == "table" and #order > 0 then
+    return order[1]
+  end
+
+  local fallback
+  for slot in pairs(slots) do
+    if not fallback or slot < fallback then
+      fallback = slot
+    end
+  end
+  return fallback
+end
+
 ---@param strategy string
 ---@param max_slots integer
 ---@return integer|nil
-function M.find_available_slot(buf, strategy, max_slots)
-  local state = ensure_buf_state(buf)
-  local slots = state.slots
-
-  local function first_empty()
-    for slot = 1, max_slots do
-      if slots[slot] == nil then
-        return slot
-      end
-    end
-    return nil
-  end
-
+function M.find_available_slot(strategy, max_slots)
   if strategy == "cycle" then
-    local order = state.order
-    local last_slot = type(order) == "table" and order[#order] or nil
-    if not last_slot then
-      return first_empty()
-    end
-    for offset = 1, max_slots do
-      local slot = ((last_slot + offset - 1) % max_slots) + 1
-      if slots[slot] == nil then
-        return slot
-      end
-    end
-    return nil
+    return find_cycle_slot(max_slots)
+  elseif strategy == "lru" then
+    return find_lru_slot(max_slots)
+  else
+    return find_first_empty_slot(max_slots)
   end
-
-  if strategy == "lru" then
-    local empty = first_empty()
-    if empty then
-      return empty
-    end
-
-    local last_used = state.last_used
-    if type(last_used) == "table" then
-      local oldest_slot
-      local oldest_time
-      for slot in pairs(slots) do
-        local ts = last_used[slot] or 0
-        if not oldest_time or ts < oldest_time then
-          oldest_time = ts
-          oldest_slot = slot
-        end
-      end
-      if oldest_slot then
-        return oldest_slot
-      end
-    end
-
-    local order = state.order
-    if type(order) == "table" and #order > 0 then
-      return order[1]
-    end
-
-    local fallback
-    for slot in pairs(slots) do
-      if not fallback or slot < fallback then
-        fallback = slot
-      end
-    end
-    return fallback
-  end
-
-  return first_empty()
 end
 
----@param buf integer
 ---@param policy string
 ---@return integer|nil
-function M.evict_slot(buf, policy)
+function M.evict_slot(policy)
   if policy == "no_op" then
     return nil
   end
 
-  local state = ensure_buf_state(buf)
-  local slots = state.slots
-  local order = state.order
+  local slots = global_state.slots
+  local order = global_state.order
 
   if type(order) == "table" and #order > 0 then
     if policy == "replace_oldest" then
@@ -350,12 +358,6 @@ function M.evict_slot(buf, policy)
   end
 
   return fallback
-end
-
----@param buf integer
----@return nil
-function M.clear_buf_state(buf)
-  pcall(vim.api.nvim_buf_del_var, buf, "pinwords")
 end
 
 ---@param win integer

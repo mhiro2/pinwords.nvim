@@ -52,46 +52,64 @@ local default_config = {
 ---@type PinwordsConfig
 local config = vim.deepcopy(default_config)
 
+---@param value any
+---@param validator fun(v: any): boolean
+---@param default any
+---@param error_msg string
+---@return any
+local function validate_field(value, validator, default, error_msg)
+  if not validator(value) then
+    warn(error_msg)
+    return default
+  end
+  return value
+end
+
 ---@param opts? PinwordsConfig
 ---@return PinwordsConfig
 local function sanitize_config(opts)
   local cfg = vim.tbl_deep_extend("force", default_config, opts or {})
 
-  if type(cfg.slots) ~= "number" or cfg.slots < 1 or cfg.slots % 1 ~= 0 then
-    warn("slots must be a positive integer; fallback to default")
-    cfg.slots = default_config.slots
-  end
+  local valid_strategies = { first_empty = true, cycle = true, lru = true }
+  local valid_on_full = { replace_oldest = true, replace_last = true, no_op = true }
 
-  if type(cfg.whole_word) ~= "boolean" then
-    warn("whole_word must be boolean; fallback to default")
-    cfg.whole_word = default_config.whole_word
-  end
+  cfg.slots = validate_field(cfg.slots, function(v)
+    return type(v) == "number" and v >= 1 and v % 1 == 0
+  end, default_config.slots, "slots must be a positive integer; fallback to default")
 
-  if type(cfg.case_sensitive) ~= "boolean" then
-    warn("case_sensitive must be boolean; fallback to default")
-    cfg.case_sensitive = default_config.case_sensitive
-  end
+  cfg.whole_word = validate_field(cfg.whole_word, function(v)
+    return type(v) == "boolean"
+  end, default_config.whole_word, "whole_word must be boolean; fallback to default")
+
+  cfg.case_sensitive = validate_field(cfg.case_sensitive, function(v)
+    return type(v) == "boolean"
+  end, default_config.case_sensitive, "case_sensitive must be boolean; fallback to default")
 
   if type(cfg.auto_allocation) ~= "table" then
     warn("auto_allocation must be a table; fallback to default")
     cfg.auto_allocation = vim.deepcopy(default_config.auto_allocation)
-  end
+  else
+    cfg.auto_allocation.strategy = validate_field(
+      cfg.auto_allocation.strategy,
+      function(v)
+        return valid_strategies[v]
+      end,
+      default_config.auto_allocation.strategy,
+      "auto_allocation.strategy must be one of: first_empty, cycle, lru; fallback to default"
+    )
 
-  local strategy = cfg.auto_allocation.strategy
-  if strategy ~= "first_empty" and strategy ~= "cycle" and strategy ~= "lru" then
-    warn("auto_allocation.strategy must be one of: first_empty, cycle, lru; fallback to default")
-    cfg.auto_allocation.strategy = default_config.auto_allocation.strategy
-  end
+    cfg.auto_allocation.on_full = validate_field(
+      cfg.auto_allocation.on_full,
+      function(v)
+        return valid_on_full[v]
+      end,
+      default_config.auto_allocation.on_full,
+      "auto_allocation.on_full must be one of: replace_oldest, replace_last, no_op; fallback to default"
+    )
 
-  local on_full = cfg.auto_allocation.on_full
-  if on_full ~= "replace_oldest" and on_full ~= "replace_last" and on_full ~= "no_op" then
-    warn("auto_allocation.on_full must be one of: replace_oldest, replace_last, no_op; fallback to default")
-    cfg.auto_allocation.on_full = default_config.auto_allocation.on_full
-  end
-
-  if type(cfg.auto_allocation.toggle_same) ~= "boolean" then
-    warn("auto_allocation.toggle_same must be boolean; fallback to default")
-    cfg.auto_allocation.toggle_same = default_config.auto_allocation.toggle_same
+    cfg.auto_allocation.toggle_same = validate_field(cfg.auto_allocation.toggle_same, function(v)
+      return type(v) == "boolean"
+    end, default_config.auto_allocation.toggle_same, "auto_allocation.toggle_same must be boolean; fallback to default")
   end
 
   return cfg
@@ -172,25 +190,24 @@ local function update_cword_for_window(win)
   end
 
   local raw = vim.fn.expand("<cword>")
-  if raw == "" then
-    if cword_state.match_id then
-      matcher.delete_match_id_for_window(win, cword_state.match_id)
-      cword_state.match_id = nil
-    end
-    cword_state.pattern = nil
-    win_state.cword = cword_state
-    state.set_win_state(win, win_state)
-    return
-  end
+  local pattern_text = raw ~= "" and build_pattern(raw) or nil
 
-  local pattern_text = build_pattern(raw)
   if cword_state.pattern == pattern_text then
     return
   end
 
-  local id = matcher.apply_cword_for_window(win, cword_state.match_id, pattern_text)
-  cword_state.match_id = id
-  cword_state.pattern = pattern_text
+  if pattern_text then
+    local id = matcher.apply_cword_for_window(win, cword_state.match_id, pattern_text)
+    cword_state.match_id = id
+    cword_state.pattern = pattern_text
+  else
+    if cword_state.match_id then
+      matcher.delete_match_id_for_window(win, cword_state.match_id)
+    end
+    cword_state.match_id = nil
+    cword_state.pattern = nil
+  end
+
   win_state.cword = cword_state
   state.set_win_state(win, win_state)
 end
@@ -200,17 +217,16 @@ end
 function M.setup(opts)
   config = sanitize_config(opts)
 
+  -- Initialize global state
+  state.init_global_state()
+
   highlight.apply(config.slots)
   commands.setup(config.slots)
 
-  -- Prune existing state when slots are reduced (and keep order/last_used consistent).
-  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_valid(buf) then
-      state.prune_buf_state(buf, config.slots)
-    end
-  end
+  -- Prune global state when slots are reduced
+  state.prune_global_state(config.slots)
 
-  -- Rebuild window-local matches from buffer state to reflect potential pruning.
+  -- Rebuild window-local matches from global state
   for _, win in ipairs(vim.api.nvim_list_wins()) do
     matcher.reapply_all_for_window(win)
     if cword_enabled_wins[win] then
@@ -249,13 +265,6 @@ function M.setup(opts)
     end,
   })
 
-  vim.api.nvim_create_autocmd("BufWipeout", {
-    group = group,
-    callback = function(args)
-      state.clear_buf_state(args.buf)
-    end,
-  })
-
   vim.api.nvim_create_autocmd("ColorScheme", {
     group = group,
     callback = function()
@@ -274,71 +283,68 @@ function M.setup(opts)
   })
 end
 
+---@param raw string
+---@param slot integer
+---@param opts? PinwordsSetOpts
+local function apply_slot(raw, slot, opts)
+  local entry = build_entry(raw, slot, opts)
+  state.set_slot(slot, entry)
+  state.touch_slot(slot)
+  matcher.apply_slot_globally(slot, entry)
+end
+
+---@param raw string
+---@param pattern_text string
+---@return integer|nil
+local function find_existing_slot(raw, pattern_text)
+  local existing = state.find_slot_by_raw_or_pattern(pattern_text)
+  if not existing then
+    existing = state.find_slot_by_raw_or_pattern(raw)
+  end
+  return existing
+end
+
 ---@param slot? integer
 ---@param opts? PinwordsSetOpts
 ---@return nil
 function M.set(slot, opts)
-  if slot ~= nil then
-    if not valid_slot(slot) then
-      return
-    end
-
-    local raw = resolve_raw(opts)
-    if not raw then
-      return
-    end
-
-    local entry = build_entry(raw, slot, opts)
-    local buf = vim.api.nvim_get_current_buf()
-    state.set_slot(buf, slot, entry)
-    state.touch_slot(buf, slot)
-    matcher.apply_slot_for_buffer(buf, slot, entry)
-    return
-  end
-
   local raw = resolve_raw(opts)
   if not raw then
     return
   end
 
+  if slot ~= nil then
+    if not valid_slot(slot) then
+      return
+    end
+    apply_slot(raw, slot, opts)
+    return
+  end
+
   local pattern_text = build_pattern(raw, opts)
-  local buf = vim.api.nvim_get_current_buf()
 
   if config.auto_allocation.toggle_same then
-    local existing = state.find_slot_by_raw_or_pattern(buf, pattern_text)
-    if not existing then
-      existing = state.find_slot_by_raw_or_pattern(buf, raw)
-    end
+    local existing = find_existing_slot(raw, pattern_text)
     if existing then
       M.clear(existing)
       return
     end
   end
 
-  local slot_strategy = config.auto_allocation.strategy
-  local auto_slot = state.find_available_slot(buf, slot_strategy, config.slots)
+  local auto_slot = state.find_available_slot(config.auto_allocation.strategy, config.slots)
   if not auto_slot then
-    local policy = config.auto_allocation.on_full
-    if policy == "no_op" then
+    if config.auto_allocation.on_full == "no_op" then
       vim.notify("pinwords: no available slots", vim.log.levels.INFO)
       return
     end
 
-    auto_slot = state.evict_slot(buf, policy)
+    auto_slot = state.evict_slot(config.auto_allocation.on_full)
     if not auto_slot then
       return
     end
   end
 
-  local entry = {
-    raw = raw,
-    pattern = pattern_text,
-    hl_group = "PinWord" .. auto_slot,
-  }
-
-  state.set_slot(buf, auto_slot, entry)
-  state.touch_slot(buf, auto_slot)
-  matcher.apply_slot_for_buffer(buf, auto_slot, entry)
+  apply_slot(raw, auto_slot, opts)
 end
 
 ---@param slot integer
@@ -348,9 +354,8 @@ function M.clear(slot)
     return
   end
 
-  local buf = vim.api.nvim_get_current_buf()
-  state.clear_slot(buf, slot)
-  matcher.clear_slot_for_buffer(buf, slot)
+  state.clear_slot(slot)
+  matcher.clear_slot_globally(slot)
 end
 
 ---@param opts? PinwordsSetOpts
@@ -364,13 +369,12 @@ function M.cword_toggle()
   local win = vim.api.nvim_get_current_win()
   local win_state = state.get_win_state(win)
   local cword_state = win_state.cword or { enabled = false }
-  local enabled = not cword_state.enabled
-  cword_state.enabled = enabled
+  cword_state.enabled = not cword_state.enabled
 
-  if enabled then
+  if cword_state.enabled then
+    cword_enabled_wins[win] = true
     win_state.cword = cword_state
     state.set_win_state(win, win_state)
-    cword_enabled_wins[win] = true
     update_cword_for_window(win)
   else
     cword_enabled_wins[win] = nil
@@ -392,11 +396,7 @@ function M.unpin()
   end
 
   local pattern_text = build_pattern(raw)
-  local buf = vim.api.nvim_get_current_buf()
-  local slot = state.find_slot_by_raw_or_pattern(buf, pattern_text)
-  if not slot then
-    slot = state.find_slot_by_raw_or_pattern(buf, raw)
-  end
+  local slot = find_existing_slot(raw, pattern_text)
   if slot then
     M.clear(slot)
   end
@@ -404,15 +404,13 @@ end
 
 ---@return nil
 function M.clear_all()
-  local buf = vim.api.nvim_get_current_buf()
-  state.clear_all(buf)
-  matcher.clear_all_for_buffer(buf)
+  state.clear_all()
+  matcher.clear_all_globally()
 end
 
 ---@return table<integer, PinwordsSlot>
 function M.list()
-  local buf = vim.api.nvim_get_current_buf()
-  return state.get_slots(buf)
+  return state.get_slots()
 end
 
 return M

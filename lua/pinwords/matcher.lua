@@ -79,23 +79,37 @@ function M.apply_slot_for_buffer(buf, slot, entry)
 end
 
 ---@param win integer
+local function clear_all_for_window(win)
+  local win_state = state.get_win_state(win)
+  for _, id in pairs(win_state.match_ids) do
+    delete_match_id(win, id)
+  end
+  win_state.match_ids = {}
+  state.set_win_state(win, win_state)
+end
+
+---@param win integer
+---@param slot integer
+local function clear_slot_for_window(win, slot)
+  local win_state = state.get_win_state(win)
+  local id = win_state.match_ids[slot]
+  if id then
+    delete_match_id(win, id)
+    win_state.match_ids[slot] = nil
+    state.set_win_state(win, win_state)
+  end
+end
+
+---@param win integer
 ---@return nil
 function M.reapply_all_for_window(win)
   if not win or not vim.api.nvim_win_is_valid(win) then
     return
   end
 
-  local buf = vim.api.nvim_win_get_buf(win)
-  local slots = state.get_slots(buf)
+  clear_all_for_window(win)
 
-  local win_state = state.get_win_state(win)
-  for _, id in pairs(win_state.match_ids) do
-    delete_match_id(win, id)
-  end
-
-  win_state.match_ids = {}
-  state.set_win_state(win, win_state)
-
+  local slots = state.get_slots()
   for slot, entry in pairs(slots) do
     M.apply_slot_for_window(win, slot, entry)
   end
@@ -106,13 +120,7 @@ end
 ---@return nil
 function M.clear_slot_for_buffer(buf, slot)
   for _, win in ipairs(wins_showing_buf(buf)) do
-    local win_state = state.get_win_state(win)
-    local id = win_state.match_ids[slot]
-    if id then
-      delete_match_id(win, id)
-      win_state.match_ids[slot] = nil
-      state.set_win_state(win, win_state)
-    end
+    clear_slot_for_window(win, slot)
   end
 end
 
@@ -120,12 +128,39 @@ end
 ---@return nil
 function M.clear_all_for_buffer(buf)
   for _, win in ipairs(wins_showing_buf(buf)) do
-    local win_state = state.get_win_state(win)
-    for _, id in pairs(win_state.match_ids) do
-      delete_match_id(win, id)
+    clear_all_for_window(win)
+  end
+end
+
+---@param slot integer
+---@param entry PinwordsSlot
+---@return nil
+function M.apply_slot_globally(slot, entry)
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_is_loaded(buf) then
+      for _, win in ipairs(wins_showing_buf(buf)) do
+        M.apply_slot_for_window(win, slot, entry)
+      end
     end
-    win_state.match_ids = {}
-    state.set_win_state(win, win_state)
+  end
+end
+
+---@param slot integer
+---@return nil
+function M.clear_slot_globally(slot)
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_is_valid(win) then
+      clear_slot_for_window(win, slot)
+    end
+  end
+end
+
+---@return nil
+function M.clear_all_globally()
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_is_valid(win) then
+      clear_all_for_window(win)
+    end
   end
 end
 
@@ -161,13 +196,15 @@ end
 function M.clear_cword_for_window(win)
   local win_state = state.get_win_state(win)
   local cword_state = win_state.cword
-  if cword_state and cword_state.match_id then
-    delete_match_id(win, cword_state.match_id)
-    cword_state.match_id = nil
-    cword_state.pattern = nil
-    win_state.cword = cword_state
-    state.set_win_state(win, win_state)
+  if not cword_state or not cword_state.match_id then
+    return
   end
+
+  delete_match_id(win, cword_state.match_id)
+  cword_state.match_id = nil
+  cword_state.pattern = nil
+  win_state.cword = cword_state
+  state.set_win_state(win, win_state)
 end
 
 return M
