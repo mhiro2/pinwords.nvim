@@ -120,10 +120,9 @@ T["pin word reapplied when window reopened"] = function()
   MiniTest.expect.equality(match ~= nil, true)
 end
 
-T["pin words not shared across different buffers"] = function()
+T["pin words shared globally across all buffers"] = function()
   helpers.setup_buffer({ "foo bar baz" })
   local buf1 = vim.api.nvim_get_current_buf()
-  local win1 = vim.api.nvim_get_current_win()
 
   -- Set pin word in buffer 1
   require("pinwords").set(1)
@@ -133,22 +132,63 @@ T["pin words not shared across different buffers"] = function()
   helpers.setup_buffer({ "foo bar baz" })
   local buf2 = vim.api.nvim_get_current_buf()
 
-  -- Verify buffer 2 has no pin word
-  local slots2 = require("pinwords").list()
-  MiniTest.expect.equality(next(slots2), nil)
+  -- Verify buffer 2 automatically has the same pin word
+  local match = helpers.find_match("PinWord1")
+  MiniTest.expect.equality(match ~= nil, true)
 
-  -- Set pin word in buffer 2
+  -- Verify global list shows the word
+  local slots = require("pinwords").list()
+  MiniTest.expect.equality(slots[1].raw, "foo")
+
+  -- Clear from buffer 2
+  require("pinwords").clear(1)
+
+  -- Switch to buffer 1 and verify it's also cleared
+  vim.api.nvim_set_current_buf(buf1)
+  local match1 = helpers.find_match("PinWord1")
+  MiniTest.expect.equality(match1, nil)
+
+  local slots_after = require("pinwords").list()
+  MiniTest.expect.equality(next(slots_after), nil)
+end
+
+T["pin word immediately appears in all open buffers"] = function()
+  helpers.setup_buffer({ "foo bar baz" })
+  local buf1 = vim.api.nvim_get_current_buf()
+  local win1 = vim.api.nvim_get_current_win()
+
+  -- Create second buffer in a split
+  vim.cmd("vsplit")
+  vim.cmd("enew")
+  helpers.setup_buffer({ "qux foo quux" })
+  local buf2 = vim.api.nvim_get_current_buf()
+  local win2 = vim.api.nvim_get_current_win()
+
+  -- Set pin word from buffer 2
+  vim.api.nvim_win_set_cursor(win2, { 1, 4 }) -- on "foo"
   require("pinwords").set(1)
 
-  -- Switch back to buffer 1 and verify its pin word remains
-  vim.api.nvim_set_current_buf(buf1)
-  local slots1 = require("pinwords").list()
-  MiniTest.expect.equality(slots1[1].raw, "foo")
+  -- Immediately check buffer 1's window without switching
+  local match1 = vim.api.nvim_win_call(win1, function()
+    return helpers.find_match("PinWord1")
+  end)
 
-  -- Switch back to buffer 2 and verify its pin word remains
-  vim.api.nvim_set_current_buf(buf2)
-  local slots2_again = require("pinwords").list()
-  MiniTest.expect.equality(slots2_again[1].raw, "foo")
+  MiniTest.expect.equality(match1 ~= nil, true)
+end
+
+T["new buffers automatically receive existing global highlights"] = function()
+  helpers.setup_buffer({ "test word" })
+
+  -- Pin a word
+  require("pinwords").set(1)
+
+  -- Create a new buffer with the same word
+  vim.cmd("enew")
+  helpers.setup_buffer({ "another test buffer" })
+
+  -- The highlight should be automatically applied
+  local match = helpers.find_match("PinWord1")
+  MiniTest.expect.equality(match ~= nil, true)
 end
 
 return T

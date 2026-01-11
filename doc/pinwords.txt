@@ -24,7 +24,7 @@ SETUP                                                           *pinwords-setup*
 PERSISTENCE                                                *pinwords-persistence*
 
   Highlights remain until you clear them (they do not disappear automatically).
-  Pins are buffer-local and are not saved across Neovim sessions.
+  Pins are global across all buffers and are not saved across Neovim sessions.
 
 AUTO ALLOCATION                                          *pinwords-auto-allocation*
 

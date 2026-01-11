@@ -16,6 +16,9 @@ function M.create_test_set()
       pre_case = function()
         M.close_extra_windows()
         vim.cmd("enew!")
+
+        -- Clear global state before setup to ensure clean state per test
+        require("pinwords.state").clear_all()
         require("pinwords").setup({})
 
         -- Reset window-local cword state.
@@ -68,8 +71,8 @@ function M.clear_hl(name)
   vim.cmd("hi clear " .. name)
 end
 
----@param func function Function to run with suppressed notifications
----@return any, ... The results from calling func
+---@param func function
+---@return any
 function M.with_notify_override(func)
   local orig_notify = vim.notify
   local notified = {}
@@ -79,12 +82,10 @@ function M.with_notify_override(func)
   end
 
   local ok, result = pcall(func, notified)
-
-  -- Always restore vim.notify, even if func throws an error
   vim.notify = orig_notify
 
   if not ok then
-    error(result) -- re-throw the error after restoration
+    error(result)
   end
 
   return result
