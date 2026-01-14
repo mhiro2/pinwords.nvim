@@ -52,7 +52,7 @@ COMMANDS                                                       *pinwords-command
   :PinWord {slot}        Pin word under cursor (visual range pins selection).
   :UnpinWord             Unpin word under cursor.
   :UnpinWord {slot}      Clear slot.
-  :UnpinAllWords         Clear all.
+  :UnpinAllWords         Clear all pinned words.
   :PinWordList           List active pins.
   :PinWordCwordToggle    Toggle cursor-word highlight (current window, incl. insert).
 
