@@ -161,7 +161,7 @@ function M.setup(max_slots)
 
   vim.api.nvim_create_user_command("UnpinAllWords", function()
     require("pinwords").clear_all()
-  end, { nargs = 0, force = true, desc = "Clear all pinned words in current buffer." })
+  end, { nargs = 0, force = true, desc = "Clear all pinned words." })
 
   vim.api.nvim_create_user_command("PinWordList", function()
     local slots = require("pinwords").list()
