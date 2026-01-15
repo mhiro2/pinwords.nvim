@@ -19,6 +19,9 @@ SETUP                                                           *pinwords-setup*
       on_full = "replace_oldest", -- "replace_oldest" | "replace_last" | "no_op"
       toggle_same = true,
     },
+    telescope = {
+      enabled = false,
+    },
   })
 
 PERSISTENCE                                                *pinwords-persistence*
@@ -71,6 +74,34 @@ HIGHLIGHTS                                                     *pinwords-highlig
 
   PinWord1 .. PinWord9
   PinWordCword
+
+TELESCOPE INTEGRATION                                     *pinwords-telescope*
+
+  pinwords.nvim includes an optional Telescope.nvim extension for browsing and
+  managing pinned words through a fuzzy finder interface.
+
+  The extension is auto-loaded only when:
+    - Telescope is installed
+    - telescope.enabled = true in setup()
+
+  Commands: ~
+    :Telescope pinwords    Open the pinned words picker
+
+  Lua API: ~
+    require("telescope").extensions.pinwords.pinwords({opts})
+
+  Key Mappings: ~
+    <Tab>             Toggle multi-selection
+    <CR> / <Enter>    Unpin selected word(s) - supports multi-select
+    <C-d>             Unpin selected word (single)
+    <C-x>             Clear all pinned words
+    <Esc> / <C-c>     Close picker
+
+  Features: ~
+    - List all pinned words with slot number and highlight color
+    - Fuzzy search by slot number or word text
+    - Multi-select with <Tab> to unpin multiple words at once
+    - Unpin individual words or clear all
 
 ==============================================================================
 vim:tw=78:et:ft=help

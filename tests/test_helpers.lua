@@ -4,7 +4,9 @@ local M = {}
 function M.close_extra_windows()
   local wins = vim.api.nvim_list_wins()
   for i = #wins, 2, -1 do
-    vim.api.nvim_win_close(wins[i], true)
+    if vim.api.nvim_win_is_valid(wins[i]) then
+      vim.api.nvim_win_close(wins[i], true)
+    end
   end
 end
 
