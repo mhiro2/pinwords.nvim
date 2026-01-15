@@ -73,7 +73,6 @@ end
 
 T["cword is window-local"] = function()
   helpers.setup_buffer({ "foo bar", "baz" })
-  local buf = vim.api.nvim_get_current_buf()
   local win1 = vim.api.nvim_get_current_win()
 
   local pinwords = require("pinwords")

@@ -23,7 +23,7 @@ stylua-check:
 	stylua --check .
 
 selene:
-	selene ./lua
+	selene ./lua ./plugin ./tests
 
 test: deps
 	MINI_PATH="$(MINI_PATH)" \

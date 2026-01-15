@@ -26,7 +26,6 @@ end
 
 T["pin word set in one window appears in other windows"] = function()
   helpers.setup_buffer({ "foo bar baz", "qux quux" })
-  local buf = vim.api.nvim_get_current_buf()
   local win1 = vim.api.nvim_get_current_win()
 
   -- Set pin word in window 1
@@ -130,7 +129,6 @@ T["pin words shared globally across all buffers"] = function()
   -- Create new buffer
   vim.cmd("enew")
   helpers.setup_buffer({ "foo bar baz" })
-  local buf2 = vim.api.nvim_get_current_buf()
 
   -- Verify buffer 2 automatically has the same pin word
   local match = helpers.find_match("PinWord1")
@@ -154,14 +152,12 @@ end
 
 T["pin word immediately appears in all open buffers"] = function()
   helpers.setup_buffer({ "foo bar baz" })
-  local buf1 = vim.api.nvim_get_current_buf()
   local win1 = vim.api.nvim_get_current_win()
 
   -- Create second buffer in a split
   vim.cmd("vsplit")
   vim.cmd("enew")
   helpers.setup_buffer({ "qux foo quux" })
-  local buf2 = vim.api.nvim_get_current_buf()
   local win2 = vim.api.nvim_get_current_win()
 
   -- Set pin word from buffer 2

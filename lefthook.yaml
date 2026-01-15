@@ -6,7 +6,7 @@ pre-commit:
   parallel: true
   commands:
     selene:
-      glob: "{lua,plugin}/**/*.lua"
+      glob: "{lua,plugin,tests}/**/*.lua"
       run: selene {staged_files}
     stylua:
       glob: "*.lua"
