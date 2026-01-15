@@ -96,6 +96,18 @@ require("pinwords").setup({
 | `on_full` | `replace_oldest`, `replace_last`, `no_op` | What to do when no empty slot is found (applies to `first_empty`/`cycle`). |
 | `toggle_same` | `true`, `false` | If the same pattern is already pinned, unpin it instead of adding a new slot. |
 
+#### Telescope Integration
+
+Enable auto-loading of the Telescope extension (disabled by default to avoid forcing a Telescope require during startup):
+
+```lua
+require("pinwords").setup({
+  telescope = {
+    enabled = true,
+  },
+})
+```
+
 ## 🛠 Usage
 
 ### Commands
@@ -122,6 +134,46 @@ require("pinwords").clear(slot)
 require("pinwords").clear_all()
 require("pinwords").list()
 ```
+
+## 🔭 Telescope Integration
+
+pinwords.nvim includes an optional Telescope.nvim extension for browsing and managing pinned words through a fuzzy finder interface.
+To auto-load the extension, set `telescope.enabled = true` in `setup()` and ensure Telescope is installed.
+
+> [!NOTE]
+> The Telescope extension is **completely optional**. pinwords.nvim works perfectly without Telescope - the extension only provides an alternative interface if you have Telescope installed.
+
+### Usage
+
+**Via Telescope command:**
+```vim
+:Telescope pinwords
+```
+
+**Via Lua:**
+```lua
+vim.keymap.set("n", "<leader>fp", function()
+  require("telescope").extensions.pinwords.pinwords()
+end, { desc = "Telescope: Pinned words" })
+```
+
+### Features
+
+- **List all pinned words**: Shows slot number, word, and actual highlight color
+- **Unpin individual words**: Press `<CR>` or `<C-d>` on an entry to unpin it
+- **Clear all**: Press `<C-x>` to clear all pinned words
+- **Fuzzy search**: Filter by slot number or word text
+- **Multi-select**: Press `<Tab>` to mark multiple entries, then `<CR>` to unpin all selected
+
+### Key Mappings
+
+| Key | Action |
+|-----|--------|
+| `<Tab>` | Toggle multi-selection |
+| `<CR>` / `<Enter>` | Unpin selected word(s) - supports multi-select |
+| `<C-d>` | Unpin selected word (single) |
+| `<C-x>` | Clear all pinned words |
+| `<Esc>` / `<C-c>` | Close picker |
 
 ## 🎨 Highlight Groups
 

@@ -16,11 +16,15 @@ end
 ---@field whole_word boolean
 ---@field case_sensitive boolean
 ---@field auto_allocation PinwordsAutoAllocation
+---@field telescope PinwordsTelescopeConfig
 
 ---@class PinwordsAutoAllocation
 ---@field strategy PinwordsAutoAllocationStrategy
 ---@field on_full PinwordsAutoAllocationOnFull
 ---@field toggle_same boolean
+
+---@class PinwordsTelescopeConfig
+---@field enabled boolean
 
 ---@alias PinwordsAutoAllocationStrategy
 ---| '"first_empty"'
@@ -46,6 +50,9 @@ local default_config = {
     strategy = "first_empty",
     on_full = "replace_oldest",
     toggle_same = true,
+  },
+  telescope = {
+    enabled = false,
   },
 }
 
@@ -110,6 +117,15 @@ local function sanitize_config(opts)
     cfg.auto_allocation.toggle_same = validate_field(cfg.auto_allocation.toggle_same, function(v)
       return type(v) == "boolean"
     end, default_config.auto_allocation.toggle_same, "auto_allocation.toggle_same must be boolean; fallback to default")
+  end
+
+  if type(cfg.telescope) ~= "table" then
+    warn("telescope must be a table; fallback to default")
+    cfg.telescope = vim.deepcopy(default_config.telescope)
+  else
+    cfg.telescope.enabled = validate_field(cfg.telescope.enabled, function(v)
+      return type(v) == "boolean"
+    end, default_config.telescope.enabled, "telescope.enabled must be boolean; fallback to default")
   end
 
   return cfg
@@ -281,6 +297,14 @@ function M.setup(opts)
       end
     end,
   })
+
+  -- Load Telescope extension if enabled and available
+  if config.telescope.enabled then
+    local ok, telescope = pcall(require, "telescope")
+    if ok and telescope.load_extension then
+      pcall(telescope.load_extension, "pinwords")
+    end
+  end
 end
 
 ---@param raw string
