@@ -96,17 +96,24 @@ require("pinwords").setup({
 | `on_full` | `replace_oldest`, `replace_last`, `no_op` | What to do when no empty slot is found (applies to `first_empty`/`cycle`). |
 | `toggle_same` | `true`, `false` | If the same pattern is already pinned, unpin it instead of adding a new slot. |
 
-#### Telescope Integration
+#### Picker Integrations
 
-Enable auto-loading of the Telescope extension (disabled by default to avoid forcing a Telescope require during startup):
+Enable auto-loading of optional picker extensions (disabled by default to avoid forcing dependencies at startup):
 
 ```lua
 require("pinwords").setup({
+  -- Telescope.nvim integration
   telescope = {
+    enabled = true,
+  },
+  -- Snacks.nvim integration
+  snacks = {
     enabled = true,
   },
 })
 ```
+
+See the [Picker Integrations](#-picker-integrations) section for usage details.
 
 ## 🛠 Usage
 
@@ -135,45 +142,78 @@ require("pinwords").clear_all()
 require("pinwords").list()
 ```
 
-## 🔭 Telescope Integration
+## 🔍 Picker Integrations
 
-pinwords.nvim includes an optional Telescope.nvim extension for browsing and managing pinned words through a fuzzy finder interface.
-To auto-load the extension, set `telescope.enabled = true` in `setup()` and ensure Telescope is installed.
+pinwords.nvim provides optional integrations with popular picker plugins for browsing and managing pinned words through a fuzzy finder interface.
 
 > [!NOTE]
-> The Telescope extension is **completely optional**. pinwords.nvim works perfectly without Telescope - the extension only provides an alternative interface if you have Telescope installed.
+> Both integrations are **completely optional**. pinwords.nvim works perfectly without them - they only provide alternative interfaces if you have the picker plugins installed.
 
-### Usage
+### Common Features
 
-**Via Telescope command:**
+All picker integrations provide:
+- **List all pinned words**: Shows slot number, word, and actual highlight color
+- **Unpin individual words**: Select and unpin entries
+- **Clear all**: Clear all pinned words at once
+- **Fuzzy search**: Filter by slot number or word text
+- **Multi-select**: Select multiple entries and unpin them together
+
+### Common Key Mappings
+
+| Key | Action |
+|-----|--------|
+| `<Tab>` / `<Shift-Tab>` | Toggle multi-selection |
+| `<CR>` / `<Enter>` | Unpin selected word(s) - supports multi-select |
+| `<C-d>` | Unpin current word |
+| `<C-x>` | Clear all pinned words |
+| `<Esc>` / `<C-c>` | Close picker |
+
+### 🔭 Telescope.nvim
+
+[Telescope.nvim](https://github.com/nvim-telescope/telescope.nvim) extension for pinwords.
+
+**Setup** (optional auto-loading):
+```lua
+require("pinwords").setup({
+  telescope = {
+    enabled = true,
+  },
+})
+```
+
+**Usage:**
 ```vim
 :Telescope pinwords
 ```
 
-**Via Lua:**
 ```lua
 vim.keymap.set("n", "<leader>fp", function()
   require("telescope").extensions.pinwords.pinwords()
 end, { desc = "Telescope: Pinned words" })
 ```
 
-### Features
+### 🍿 Snacks.nvim
 
-- **List all pinned words**: Shows slot number, word, and actual highlight color
-- **Unpin individual words**: Press `<CR>` or `<C-d>` on an entry to unpin it
-- **Clear all**: Press `<C-x>` to clear all pinned words
-- **Fuzzy search**: Filter by slot number or word text
-- **Multi-select**: Press `<Tab>` to mark multiple entries, then `<CR>` to unpin all selected
+[Snacks.nvim](https://github.com/folke/snacks.nvim) picker integration for pinwords.
 
-### Key Mappings
+**Setup** (optional auto-loading):
+```lua
+require("pinwords").setup({
+  snacks = {
+    enabled = true,
+  },
+})
+```
 
-| Key | Action |
-|-----|--------|
-| `<Tab>` | Toggle multi-selection |
-| `<CR>` / `<Enter>` | Unpin selected word(s) - supports multi-select |
-| `<C-d>` | Unpin selected word (single) |
-| `<C-x>` | Clear all pinned words |
-| `<Esc>` / `<C-c>` | Close picker |
+**Usage:**
+```lua
+vim.keymap.set("n", "<leader>fp", function()
+  require("pinwords.snacks").picker()
+end, { desc = "Snacks: Pinned words" })
+```
+
+> [!NOTE]
+> To keep multi-select stable in Snacks, pinwords assigns a unique `id` to each entry.
 
 ## 🎨 Highlight Groups
 
@@ -188,6 +228,8 @@ Fully customizable via standard highlight overrides.
 
 * Neovim >= 0.9
 * No external dependencies
+* Optional: [telescope.nvim](https://github.com/nvim-telescope/telescope.nvim) for telescope integration
+* Optional: [snacks.nvim](https://github.com/folke/snacks.nvim) for snacks picker integration
 
 ## 📄 License
 
