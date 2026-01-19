@@ -17,6 +17,7 @@ end
 ---@field case_sensitive boolean
 ---@field auto_allocation PinwordsAutoAllocation
 ---@field telescope PinwordsTelescopeConfig
+---@field snacks PinwordsSnacksConfig
 
 ---@class PinwordsAutoAllocation
 ---@field strategy PinwordsAutoAllocationStrategy
@@ -24,6 +25,9 @@ end
 ---@field toggle_same boolean
 
 ---@class PinwordsTelescopeConfig
+---@field enabled boolean
+
+---@class PinwordsSnacksConfig
 ---@field enabled boolean
 
 ---@alias PinwordsAutoAllocationStrategy
@@ -52,6 +56,9 @@ local default_config = {
     toggle_same = true,
   },
   telescope = {
+    enabled = false,
+  },
+  snacks = {
     enabled = false,
   },
 }
@@ -126,6 +133,15 @@ local function sanitize_config(opts)
     cfg.telescope.enabled = validate_field(cfg.telescope.enabled, function(v)
       return type(v) == "boolean"
     end, default_config.telescope.enabled, "telescope.enabled must be boolean; fallback to default")
+  end
+
+  if type(cfg.snacks) ~= "table" then
+    warn("snacks must be a table; fallback to default")
+    cfg.snacks = vim.deepcopy(default_config.snacks)
+  else
+    cfg.snacks.enabled = validate_field(cfg.snacks.enabled, function(v)
+      return type(v) == "boolean"
+    end, default_config.snacks.enabled, "snacks.enabled must be boolean; fallback to default")
   end
 
   return cfg
@@ -303,6 +319,14 @@ function M.setup(opts)
     local ok, telescope = pcall(require, "telescope")
     if ok and telescope.load_extension then
       pcall(telescope.load_extension, "pinwords")
+    end
+  end
+
+  -- Load Snacks integration if enabled and available
+  if config.snacks.enabled then
+    local ok, snacks_integration = pcall(require, "pinwords.snacks")
+    if not ok or not snacks_integration then
+      warn("snacks.enabled is true but snacks.nvim is not available")
     end
   end
 end
