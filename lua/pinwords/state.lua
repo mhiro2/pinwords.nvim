@@ -145,34 +145,37 @@ end
 ---@param win integer
 ---@return PinwordsWinState
 local function ensure_win_state(win)
-  local ok, state = pcall(vim.api.nvim_win_get_var, win, "pinwords")
+  local ok, win_state = pcall(vim.api.nvim_win_get_var, win, "pinwords")
   local needs_update = false
 
-  if not ok or type(state) ~= "table" then
-    state = { match_ids = {}, cword = { enabled = false } }
+  if not ok or type(win_state) ~= "table" then
+    win_state = { match_ids = {}, cword = { enabled = false } }
     needs_update = true
   end
 
-  if type(state.match_ids) ~= "table" then
-    state.match_ids = {}
+  if type(win_state.match_ids) ~= "table" then
+    win_state.match_ids = {}
     needs_update = true
   end
 
-  if type(state.cword) ~= "table" then
-    state.cword = { enabled = false }
+  if type(win_state.cword) ~= "table" then
+    win_state.cword = { enabled = false }
     needs_update = true
   end
 
-  if state.cword.enabled == nil then
-    state.cword.enabled = false
+  if win_state.cword.enabled == nil then
+    win_state.cword.enabled = false
     needs_update = true
   end
 
   if needs_update then
-    vim.api.nvim_win_set_var(win, "pinwords", state)
+    local set_ok = pcall(vim.api.nvim_win_set_var, win, "pinwords", win_state)
+    -- Window may become invalid before we can set the state.
+    -- Return the initialized state anyway for consistency.
+    local _ = set_ok
   end
 
-  return state
+  return win_state
 end
 
 ---@return table<integer, PinwordsSlot>

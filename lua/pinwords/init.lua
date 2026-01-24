@@ -239,6 +239,24 @@ end
 ---@type table<integer, boolean>
 local cword_enabled_wins = {}
 
+---@param win integer
+---@return boolean
+local function is_cword_enabled(win)
+  if cword_enabled_wins[win] ~= true then
+    return false
+  end
+  return vim.api.nvim_win_is_valid(win)
+end
+
+---@return nil
+local function cleanup_stale_cword_wins()
+  for win in pairs(cword_enabled_wins) do
+    if type(win) ~= "number" or not vim.api.nvim_win_is_valid(win) then
+      cword_enabled_wins[win] = nil
+    end
+  end
+end
+
 ---@param value any
 ---@param fallback any
 ---@return any
@@ -346,9 +364,10 @@ function M.setup(opts)
   state.prune_global_state(config.slots)
 
   -- Rebuild window-local matches from global state
+  cleanup_stale_cword_wins()
   for _, win in ipairs(vim.api.nvim_list_wins()) do
     matcher.reapply_all_for_window(win)
-    if cword_enabled_wins[win] then
+    if is_cword_enabled(win) then
       update_cword_for_window(win)
     end
   end
@@ -362,8 +381,12 @@ function M.setup(opts)
       if type(win) ~= "number" or win == 0 then
         win = vim.api.nvim_get_current_win()
       end
+
+      -- Clean up stale window entries before processing
+      cleanup_stale_cword_wins()
+
       matcher.reapply_all_for_window(win)
-      if cword_enabled_wins[win] then
+      if is_cword_enabled(win) then
         update_cword_for_window(win)
       end
     end,
@@ -377,7 +400,7 @@ function M.setup(opts)
       end
 
       local win = vim.api.nvim_get_current_win()
-      if not cword_enabled_wins[win] then
+      if not is_cword_enabled(win) then
         return
       end
       update_cword_for_window(win)
@@ -502,16 +525,25 @@ end
 ---@return nil
 function M.cword_toggle()
   local win = vim.api.nvim_get_current_win()
+
+  if not vim.api.nvim_win_is_valid(win) then
+    return
+  end
+
   local win_state = state.get_win_state(win)
   local cword_state = win_state.cword or { enabled = false }
+  local was_enabled = cword_state.enabled
   cword_state.enabled = not cword_state.enabled
 
-  if cword_state.enabled then
+  if not was_enabled and cword_state.enabled then
     cword_enabled_wins[win] = true
     win_state.cword = cword_state
     state.set_win_state(win, win_state)
     update_cword_for_window(win)
-  else
+    return
+  end
+
+  if was_enabled and not cword_state.enabled then
     cword_enabled_wins[win] = nil
     if cword_state.match_id then
       matcher.delete_match_id_for_window(win, cword_state.match_id)

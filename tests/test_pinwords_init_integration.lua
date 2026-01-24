@@ -56,7 +56,7 @@ T["setup reapplies matches to all windows"] = function()
   pinwords.setup({ slots = 3 })
   pinwords.set(1, { raw = "foo" })
 
-  vim.cmd("vsplit")
+  helpers.open_vsplit()
 
   local match_before = vim.api.nvim_win_call(0, function()
     return helpers.find_match("PinWord1")
@@ -337,7 +337,7 @@ end
 
 T["clear_all with autocmd"] = function()
   helpers.setup_buffer({ "foo bar baz" })
-  vim.cmd("vsplit")
+  helpers.open_vsplit()
 
   local pinwords = require("pinwords")
   pinwords.setup()

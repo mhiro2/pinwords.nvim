@@ -43,6 +43,23 @@ function M.setup_buffer(lines)
   vim.api.nvim_win_set_cursor(0, { 1, 0 })
 end
 
+---@param direction "left"|"right"|"above"|"below"
+---@return integer
+function M.open_split(direction)
+  local buf = vim.api.nvim_get_current_buf()
+  return vim.api.nvim_open_win(buf, true, { split = direction })
+end
+
+---@return integer
+function M.open_vsplit()
+  return M.open_split("right")
+end
+
+---@return integer
+function M.open_hsplit()
+  return M.open_split("below")
+end
+
 ---@param group string
 ---@return table|nil
 function M.find_match(group)

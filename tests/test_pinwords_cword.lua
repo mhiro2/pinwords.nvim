@@ -89,7 +89,7 @@ T["cword is window-local"] = function()
   MiniTest.expect.equality(win1_state.cword.enabled, true)
 
   -- Create window 2 showing the same buffer
-  vim.cmd("vsplit")
+  helpers.open_vsplit()
   local win2 = vim.api.nvim_get_current_win()
 
   -- Window 2 should not have cword enabled by default
@@ -120,6 +120,112 @@ T["cword is window-local"] = function()
   MiniTest.expect.equality(match1_after ~= nil, true)
 
   -- Cleanup: disable window-local cword to avoid leaking state to other cases.
+  pinwords.cword_toggle()
+end
+
+T["cword state cleanup after window close"] = function()
+  helpers.setup_buffer({ "foo bar", "baz" })
+
+  local pinwords = require("pinwords")
+
+  -- Enable cword in current window
+  pinwords.cword_toggle()
+  local win1 = vim.api.nvim_get_current_win()
+
+  -- Verify cword is active
+  local match1 = vim.api.nvim_win_call(win1, function()
+    return helpers.find_match("PinWordCword")
+  end)
+  MiniTest.expect.equality(match1 ~= nil, true)
+
+  -- Create and close another window with cword enabled
+  helpers.open_vsplit()
+  local win2 = vim.api.nvim_get_current_win()
+  pinwords.cword_toggle()
+
+  -- Verify win2 has cword
+  local match2 = vim.api.nvim_win_call(win2, function()
+    return helpers.find_match("PinWordCword")
+  end)
+  MiniTest.expect.equality(match2 ~= nil, true)
+
+  -- Close win2
+  vim.api.nvim_win_close(win2, true)
+
+  -- Move cursor in win1 to trigger CursorMoved autocmd
+  -- This should not cause errors even though win2 is closed
+  vim.api.nvim_set_current_win(win1)
+  vim.api.nvim_win_set_cursor(win1, { 1, 4 })
+  vim.cmd("doautocmd <nomodeline> CursorMoved")
+
+  -- Verify win1 cword still works
+  local match1_after = helpers.find_match("PinWordCword")
+  MiniTest.expect.equality(match1_after ~= nil, true)
+
+  -- Cleanup
+  pinwords.cword_toggle()
+end
+
+T["cword handles invalid window IDs safely"] = function()
+  helpers.setup_buffer({ "foo bar", "baz" })
+
+  local pinwords = require("pinwords")
+  local state = require("pinwords.state")
+
+  -- Enable cword
+  pinwords.cword_toggle()
+
+  -- Get a window ID that doesn't exist (high number unlikely to be valid)
+  local fake_win = 999999
+
+  -- Verify the fake window is not valid
+  MiniTest.expect.equality(vim.api.nvim_win_is_valid(fake_win), false)
+
+  -- Getting state for invalid window should still work (creates new state)
+  -- but should not crash
+  local fake_state = state.get_win_state(fake_win)
+  MiniTest.expect.equality(type(fake_state), "table")
+  MiniTest.expect.equality(type(fake_state.cword), "table")
+
+  -- Cleanup
+  pinwords.cword_toggle()
+end
+
+T["cword cleanup runs on BufWinEnter/WinEnter"] = function()
+  helpers.setup_buffer({ "foo bar", "baz" })
+
+  local pinwords = require("pinwords")
+
+  -- Enable cword in current window
+  pinwords.cword_toggle()
+  local win1 = vim.api.nvim_get_current_win()
+
+  -- Verify cword is active
+  local match1 = vim.api.nvim_win_call(win1, function()
+    return helpers.find_match("PinWordCword")
+  end)
+  MiniTest.expect.equality(match1 ~= nil, true)
+
+  -- Create new window
+  helpers.open_hsplit()
+  local win2 = vim.api.nvim_get_current_win()
+
+  -- BufWinEnter/WinEnter autocmds should run and clean up any stale entries
+  -- This should not cause errors
+  local match2 = vim.api.nvim_win_call(win2, function()
+    return helpers.find_match("PinWordCword")
+  end)
+  -- win2 should not have cword enabled
+  MiniTest.expect.equality(match2, nil)
+
+  -- Verify win1 still has cword
+  local match1_after = vim.api.nvim_win_call(win1, function()
+    return helpers.find_match("PinWordCword")
+  end)
+  MiniTest.expect.equality(match1_after ~= nil, true)
+
+  -- Cleanup
+  vim.api.nvim_set_current_win(win1)
   pinwords.cword_toggle()
 end
 
