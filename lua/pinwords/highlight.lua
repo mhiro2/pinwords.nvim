@@ -1,8 +1,8 @@
 local M = {}
 
 ---@class PinwordsColorSpec
----@field bg? string         -- 背景色 (hex)
----@field fg? string         -- 前景色 (hex)
+---@field bg? string         -- background color (hex)
+---@field fg? string         -- foreground color (hex)
 ---@field bold? boolean
 ---@field italic? boolean
 ---@field underline? boolean
@@ -13,8 +13,8 @@ local M = {}
 ---@alias PinwordsColor string | PinwordsColorSpec
 
 ---@class PinwordsColorsConfig
----@field [integer] PinwordsColor  -- スロット番号 => 色
----@field cword? PinwordsColor     -- カーソル下単語の色
+---@field [integer] PinwordsColor  -- slot number => color
+---@field cword? PinwordsColor     -- cursor word color
 
 ---@type string[]
 local default_palette = {

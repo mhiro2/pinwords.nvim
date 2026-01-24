@@ -18,6 +18,8 @@ function M.create_test_set()
       pre_case = function()
         M.close_extra_windows()
         vim.cmd("enew!")
+        -- Clear any stray matchadd entries that are not tracked in pinwords state.
+        vim.fn.clearmatches()
 
         -- Clear global state before setup to ensure clean state per test
         require("pinwords.state").clear_all()
@@ -41,6 +43,23 @@ function M.setup_buffer(lines)
   local buf = vim.api.nvim_get_current_buf()
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.api.nvim_win_set_cursor(0, { 1, 0 })
+end
+
+---@param direction "left"|"right"|"above"|"below"
+---@return integer
+function M.open_split(direction)
+  local buf = vim.api.nvim_get_current_buf()
+  return vim.api.nvim_open_win(buf, true, { split = direction })
+end
+
+---@return integer
+function M.open_vsplit()
+  return M.open_split("right")
+end
+
+---@return integer
+function M.open_hsplit()
+  return M.open_split("below")
 end
 
 ---@param group string

@@ -5,7 +5,7 @@ local T = helpers.create_test_set()
 
 T["set/clear affects all windows showing the buffer"] = function()
   helpers.setup_buffer({ "foo bar", "baz" })
-  vim.cmd("vsplit")
+  helpers.open_vsplit()
 
   require("pinwords").set(1)
   for _, win in ipairs(vim.api.nvim_list_wins()) do
@@ -32,7 +32,7 @@ T["pin word set in one window appears in other windows"] = function()
   require("pinwords").set(1)
 
   -- Create window 2 showing the same buffer
-  vim.cmd("vsplit")
+  helpers.open_vsplit()
   local win2 = vim.api.nvim_get_current_win()
 
   -- Verify match exists in both windows
@@ -98,7 +98,7 @@ T["pin word reapplied when window reopened"] = function()
   require("pinwords").set(1)
 
   -- Split window
-  vim.cmd("vsplit")
+  helpers.open_vsplit()
   local wins = vim.api.nvim_list_wins()
   local win2 = wins[2]
 
@@ -106,7 +106,7 @@ T["pin word reapplied when window reopened"] = function()
   vim.api.nvim_win_close(win2, true)
 
   -- Reopen the same buffer in a window (triggers BufWinEnter)
-  vim.cmd("vsplit")
+  helpers.open_vsplit()
   local new_wins = vim.api.nvim_list_wins()
   local new_win = new_wins[2]
   vim.api.nvim_win_set_buf(new_win, buf)
@@ -155,7 +155,7 @@ T["pin word immediately appears in all open buffers"] = function()
   local win1 = vim.api.nvim_get_current_win()
 
   -- Create second buffer in a split
-  vim.cmd("vsplit")
+  helpers.open_vsplit()
   vim.cmd("enew")
   helpers.setup_buffer({ "qux foo quux" })
   local win2 = vim.api.nvim_get_current_win()

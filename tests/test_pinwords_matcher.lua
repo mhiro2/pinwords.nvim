@@ -60,7 +60,7 @@ end
 T["apply_slot_for_buffer adds match to all windows showing buffer"] = function()
   helpers.setup_buffer({ "foo bar", "baz" })
   local buf = vim.api.nvim_get_current_buf()
-  vim.cmd("vsplit")
+  helpers.open_vsplit()
 
   local matcher = require("pinwords.matcher")
   local entry = {
@@ -82,7 +82,7 @@ end
 T["clear_slot_for_buffer removes match from all windows showing buffer"] = function()
   helpers.setup_buffer({ "foo bar", "baz" })
   local buf = vim.api.nvim_get_current_buf()
-  vim.cmd("vsplit")
+  helpers.open_vsplit()
 
   local pinwords = require("pinwords")
   pinwords.set(1)
@@ -107,7 +107,7 @@ end
 T["clear_all_for_buffer removes all matches from buffer"] = function()
   helpers.setup_buffer({ "foo bar baz" })
   local buf = vim.api.nvim_get_current_buf()
-  vim.cmd("vsplit")
+  helpers.open_vsplit()
 
   local pinwords = require("pinwords")
   pinwords.set(1)
@@ -180,7 +180,7 @@ end
 
 T["apply_slot_globally applies to all valid buffers"] = function()
   helpers.setup_buffer({ "foo bar" })
-  vim.cmd("vsplit")
+  helpers.open_vsplit()
 
   local matcher = require("pinwords.matcher")
   local entry = {
@@ -201,7 +201,7 @@ end
 
 T["clear_slot_globally removes slot from all windows"] = function()
   helpers.setup_buffer({ "foo bar" })
-  vim.cmd("vsplit")
+  helpers.open_vsplit()
 
   local pinwords = require("pinwords")
   pinwords.set(1)
@@ -225,7 +225,7 @@ end
 
 T["clear_all_globally removes all matches from all windows"] = function()
   helpers.setup_buffer({ "foo bar baz" })
-  vim.cmd("vsplit")
+  helpers.open_vsplit()
 
   local pinwords = require("pinwords")
   pinwords.set(1)
