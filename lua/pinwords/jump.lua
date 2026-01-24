@@ -5,7 +5,7 @@ local M = {}
 ---@param patterns string[]
 ---@return string
 local function build_combined_pattern(patterns)
-  -- \| で結合（Vim正規表現のOR）
+  -- Join with \| (Vim regex OR)
   return table.concat(patterns, "\\|")
 end
 
@@ -19,7 +19,7 @@ local function get_search_pattern(slot)
     return entry and entry.pattern or nil
   end
 
-  -- 全スロットのパターンを収集
+  -- Collect patterns from all slots
   local patterns = {}
   for _, entry in pairs(slots) do
     if entry.pattern then
