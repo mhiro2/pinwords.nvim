@@ -1,5 +1,6 @@
 local commands = require("pinwords.commands")
 local highlight = require("pinwords.highlight")
+local jump = require("pinwords.jump")
 local matcher = require("pinwords.matcher")
 local pattern = require("pinwords.pattern")
 local state = require("pinwords.state")
@@ -11,11 +12,28 @@ local function warn(msg)
   vim.notify("pinwords: " .. msg, vim.log.levels.WARN)
 end
 
+---@class PinwordsColorSpec
+---@field bg? string         -- 背景色 (hex)
+---@field fg? string         -- 前景色 (hex)
+---@field bold? boolean
+---@field italic? boolean
+---@field underline? boolean
+---@field strikethrough? boolean
+---@field ctermbg? integer
+---@field ctermfg? integer
+
+---@alias PinwordsColor string | PinwordsColorSpec
+
+---@class PinwordsColorsConfig
+---@field [integer] PinwordsColor  -- スロット番号 => 色
+---@field cword? PinwordsColor     -- カーソル下単語の色
+
 ---@class PinwordsConfig
 ---@field slots integer
 ---@field whole_word boolean
 ---@field case_sensitive boolean
 ---@field auto_allocation PinwordsAutoAllocation
+---@field colors? PinwordsColorsConfig
 ---@field telescope PinwordsTelescopeConfig
 ---@field snacks PinwordsSnacksConfig
 
@@ -55,6 +73,7 @@ local default_config = {
     on_full = "replace_oldest",
     toggle_same = true,
   },
+  colors = nil,
   telescope = {
     enabled = false,
   },
@@ -65,6 +84,64 @@ local default_config = {
 
 ---@type PinwordsConfig
 local config = vim.deepcopy(default_config)
+
+---@param hex string
+---@return boolean
+local function is_valid_hex(hex)
+  return type(hex) == "string" and hex:match("^#%x%x%x%x%x%x$") ~= nil
+end
+
+---@param value any
+---@param slot_name string
+---@return PinwordsColor|nil
+local function validate_color(value, slot_name)
+  if type(value) == "string" then
+    if not is_valid_hex(value) then
+      warn(slot_name .. " must be a valid hex color (e.g. #ff6b6b); ignoring")
+      return nil
+    end
+    return value
+  elseif type(value) == "table" then
+    if value.bg ~= nil and not is_valid_hex(value.bg) then
+      warn(slot_name .. ".bg must be a valid hex color; ignoring")
+      return nil
+    end
+    if value.fg ~= nil and not is_valid_hex(value.fg) then
+      warn(slot_name .. ".fg must be a valid hex color; ignoring")
+      return nil
+    end
+    return value
+  end
+  warn(slot_name .. " must be a string or table; ignoring")
+  return nil
+end
+
+---@param colors table
+---@return PinwordsColorsConfig|nil
+local function validate_colors_config(colors)
+  local validated = {}
+  local has_valid = false
+
+  for key, value in pairs(colors) do
+    if key == "cword" then
+      local valid = validate_color(value, "colors.cword")
+      if valid then
+        validated.cword = valid
+        has_valid = true
+      end
+    elseif type(key) == "number" and key >= 1 and key % 1 == 0 then
+      local valid = validate_color(value, "colors[" .. key .. "]")
+      if valid then
+        validated[key] = valid
+        has_valid = true
+      end
+    else
+      warn("colors key must be a positive integer or 'cword'; ignoring key: " .. tostring(key))
+    end
+  end
+
+  return has_valid and validated or nil
+end
 
 ---@param value any
 ---@param validator fun(v: any): boolean
@@ -142,6 +219,16 @@ local function sanitize_config(opts)
     cfg.snacks.enabled = validate_field(cfg.snacks.enabled, function(v)
       return type(v) == "boolean"
     end, default_config.snacks.enabled, "snacks.enabled must be boolean; fallback to default")
+  end
+
+  -- Validate colors
+  if cfg.colors ~= nil then
+    if type(cfg.colors) ~= "table" then
+      warn("colors must be a table; ignoring")
+      cfg.colors = nil
+    else
+      cfg.colors = validate_colors_config(cfg.colors)
+    end
   end
 
   return cfg
@@ -252,7 +339,7 @@ function M.setup(opts)
   -- Initialize global state
   state.init_global_state()
 
-  highlight.apply(config.slots)
+  highlight.apply(config.slots, config.colors)
   commands.setup(config.slots)
 
   -- Prune global state when slots are reduced
@@ -300,7 +387,7 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd("ColorScheme", {
     group = group,
     callback = function()
-      highlight.apply(config.slots)
+      highlight.apply(config.slots, config.colors)
     end,
   })
 
@@ -459,6 +546,24 @@ end
 ---@return table<integer, PinwordsSlot>
 function M.list()
   return state.get_slots()
+end
+
+---@param slot? integer
+---@return boolean success
+function M.jump_next(slot)
+  if slot ~= nil and not valid_slot(slot) then
+    return false
+  end
+  return jump.next(slot)
+end
+
+---@param slot? integer
+---@return boolean success
+function M.jump_prev(slot)
+  if slot ~= nil and not valid_slot(slot) then
+    return false
+  end
+  return jump.prev(slot)
 end
 
 return M

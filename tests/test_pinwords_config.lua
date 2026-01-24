@@ -48,4 +48,193 @@ T["setup with fewer slots prunes existing slots and matches"] = function()
   MiniTest.expect.equality(helpers.find_match("PinWord3"), nil)
 end
 
+T["setup validates colors with hex string"] = function()
+  local pinwords = require("pinwords")
+  local notified = {}
+  local orig_notify = vim.notify
+  vim.notify = function(msg, level, _opts)
+    table.insert(notified, { msg = msg, level = level })
+  end
+
+  helpers.clear_hl("PinWord1")
+  local ok = pcall(pinwords.setup, {
+    colors = {
+      [1] = "#ff0000",
+    },
+  })
+  vim.notify = orig_notify
+
+  MiniTest.expect.equality(ok, true)
+  -- No warnings for valid hex
+  local has_color_warning = false
+  for _, n in ipairs(notified) do
+    if n.msg:match("colors") then
+      has_color_warning = true
+    end
+  end
+  MiniTest.expect.equality(has_color_warning, false)
+
+  helpers.clear_hl("PinWord1")
+end
+
+T["setup warns on invalid hex color"] = function()
+  local pinwords = require("pinwords")
+  local notified = {}
+  local orig_notify = vim.notify
+  vim.notify = function(msg, level, _opts)
+    table.insert(notified, { msg = msg, level = level })
+  end
+
+  local ok = pcall(pinwords.setup, {
+    colors = {
+      [1] = "invalid",
+    },
+  })
+  vim.notify = orig_notify
+
+  MiniTest.expect.equality(ok, true)
+
+  local has_color_warning = false
+  for _, n in ipairs(notified) do
+    if n.msg:match("valid hex color") then
+      has_color_warning = true
+    end
+  end
+  MiniTest.expect.equality(has_color_warning, true)
+end
+
+T["setup validates colors table with bg"] = function()
+  local pinwords = require("pinwords")
+  local notified = {}
+  local orig_notify = vim.notify
+  vim.notify = function(msg, level, _opts)
+    table.insert(notified, { msg = msg, level = level })
+  end
+
+  helpers.clear_hl("PinWord1")
+  local ok = pcall(pinwords.setup, {
+    colors = {
+      [1] = { bg = "#00ff00", fg = "#000000" },
+    },
+  })
+  vim.notify = orig_notify
+
+  MiniTest.expect.equality(ok, true)
+
+  local has_color_warning = false
+  for _, n in ipairs(notified) do
+    if n.msg:match("colors") then
+      has_color_warning = true
+    end
+  end
+  MiniTest.expect.equality(has_color_warning, false)
+
+  helpers.clear_hl("PinWord1")
+end
+
+T["setup warns on invalid bg in table"] = function()
+  local pinwords = require("pinwords")
+  local notified = {}
+  local orig_notify = vim.notify
+  vim.notify = function(msg, level, _opts)
+    table.insert(notified, { msg = msg, level = level })
+  end
+
+  local ok = pcall(pinwords.setup, {
+    colors = {
+      [1] = { bg = "bad" },
+    },
+  })
+  vim.notify = orig_notify
+
+  MiniTest.expect.equality(ok, true)
+
+  local has_warning = false
+  for _, n in ipairs(notified) do
+    if n.msg:match("%.bg must be a valid hex") then
+      has_warning = true
+    end
+  end
+  MiniTest.expect.equality(has_warning, true)
+end
+
+T["setup warns on invalid fg in table"] = function()
+  local pinwords = require("pinwords")
+  local notified = {}
+  local orig_notify = vim.notify
+  vim.notify = function(msg, level, _opts)
+    table.insert(notified, { msg = msg, level = level })
+  end
+
+  local ok = pcall(pinwords.setup, {
+    colors = {
+      [1] = { bg = "#ff0000", fg = "bad" },
+    },
+  })
+  vim.notify = orig_notify
+
+  MiniTest.expect.equality(ok, true)
+
+  local has_warning = false
+  for _, n in ipairs(notified) do
+    if n.msg:match("%.fg must be a valid hex") then
+      has_warning = true
+    end
+  end
+  MiniTest.expect.equality(has_warning, true)
+end
+
+T["setup validates cword color"] = function()
+  local pinwords = require("pinwords")
+  local notified = {}
+  local orig_notify = vim.notify
+  vim.notify = function(msg, level, _opts)
+    table.insert(notified, { msg = msg, level = level })
+  end
+
+  helpers.clear_hl("PinWordCword")
+  local ok = pcall(pinwords.setup, {
+    colors = {
+      cword = "#ffff00",
+    },
+  })
+  vim.notify = orig_notify
+
+  MiniTest.expect.equality(ok, true)
+
+  local has_color_warning = false
+  for _, n in ipairs(notified) do
+    if n.msg:match("cword") and n.msg:match("hex") then
+      has_color_warning = true
+    end
+  end
+  MiniTest.expect.equality(has_color_warning, false)
+
+  helpers.clear_hl("PinWordCword")
+end
+
+T["setup warns on non-table colors"] = function()
+  local pinwords = require("pinwords")
+  local notified = {}
+  local orig_notify = vim.notify
+  vim.notify = function(msg, level, _opts)
+    table.insert(notified, { msg = msg, level = level })
+  end
+
+  local ok = pcall(pinwords.setup, {
+    colors = "invalid",
+  })
+  vim.notify = orig_notify
+
+  MiniTest.expect.equality(ok, true)
+
+  local has_warning = false
+  for _, n in ipairs(notified) do
+    if n.msg:match("colors must be a table") then
+      has_warning = true
+    end
+  end
+  MiniTest.expect.equality(has_warning, true)
+end
+
 return T

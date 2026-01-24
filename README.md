@@ -96,6 +96,23 @@ require("pinwords").setup({
 | `on_full` | `replace_oldest`, `replace_last`, `no_op` | What to do when no empty slot is found (applies to `first_empty`/`cycle`). |
 | `toggle_same` | `true`, `false` | If the same pattern is already pinned, unpin it instead of adding a new slot. |
 
+#### Custom Highlight Colors
+
+Customize highlight colors per slot:
+
+```lua
+require("pinwords").setup({
+  colors = {
+    [1] = "#ff6b6b",                           -- hex string
+    [2] = { bg = "#1dd1a1", fg = "#000000" },  -- with foreground color
+    [3] = { bg = "#54a0ff", bold = true },     -- with style attributes
+    cword = "#ffd166",                         -- cursor word color
+  },
+})
+```
+
+Available style attributes: `bold`, `italic`, `underline`, `strikethrough`, `ctermbg`, `ctermfg`.
+
 #### Picker Integrations
 
 Enable auto-loading of optional picker extensions (disabled by default to avoid forcing dependencies at startup):

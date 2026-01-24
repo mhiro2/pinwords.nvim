@@ -72,4 +72,122 @@ T["highlight does not overwrite user-defined PinWordCword"] = function()
   helpers.clear_hl("PinWordCword")
 end
 
+T["highlight applies user-specified hex color"] = function()
+  local highlight = require("pinwords.highlight")
+
+  helpers.clear_hl("PinWord1")
+  highlight.apply(1, { [1] = "#ff0000" })
+
+  local hl = vim.api.nvim_get_hl(0, { name = "PinWord1", link = false })
+  MiniTest.expect.equality(type(hl.bg) == "number", true)
+  -- The color is blended with Normal bg, so we can't check exact value
+  -- but it should be set
+
+  helpers.clear_hl("PinWord1")
+end
+
+T["highlight applies user-specified table with bg"] = function()
+  local highlight = require("pinwords.highlight")
+
+  helpers.clear_hl("PinWord1")
+  highlight.apply(1, { [1] = { bg = "#00ff00" } })
+
+  local hl = vim.api.nvim_get_hl(0, { name = "PinWord1", link = false })
+  MiniTest.expect.equality(type(hl.bg) == "number", true)
+
+  helpers.clear_hl("PinWord1")
+end
+
+T["highlight applies user-specified bg and fg"] = function()
+  local highlight = require("pinwords.highlight")
+
+  helpers.clear_hl("PinWord1")
+  -- When fg is specified, bg is not blended
+  highlight.apply(1, { [1] = { bg = "#ff0000", fg = "#ffffff" } })
+
+  local hl = vim.api.nvim_get_hl(0, { name = "PinWord1", link = false })
+  MiniTest.expect.equality(hl.bg, 0xff0000)
+  MiniTest.expect.equality(hl.fg, 0xffffff)
+
+  helpers.clear_hl("PinWord1")
+end
+
+T["highlight applies style attributes"] = function()
+  local highlight = require("pinwords.highlight")
+
+  helpers.clear_hl("PinWord1")
+  highlight.apply(1, { [1] = { bg = "#ff0000", bold = true, italic = true } })
+
+  local hl = vim.api.nvim_get_hl(0, { name = "PinWord1", link = false })
+  MiniTest.expect.equality(hl.bold, true)
+  MiniTest.expect.equality(hl.italic, true)
+
+  helpers.clear_hl("PinWord1")
+end
+
+T["highlight applies underline and strikethrough"] = function()
+  local highlight = require("pinwords.highlight")
+
+  helpers.clear_hl("PinWord1")
+  highlight.apply(1, { [1] = { bg = "#ff0000", underline = true, strikethrough = true } })
+
+  local hl = vim.api.nvim_get_hl(0, { name = "PinWord1", link = false })
+  MiniTest.expect.equality(hl.underline, true)
+  MiniTest.expect.equality(hl.strikethrough, true)
+
+  helpers.clear_hl("PinWord1")
+end
+
+T["highlight applies cword color"] = function()
+  local highlight = require("pinwords.highlight")
+
+  helpers.clear_hl("PinWordCword")
+  highlight.apply(1, { cword = "#00ffff" })
+
+  local hl = vim.api.nvim_get_hl(0, { name = "PinWordCword", link = false })
+  MiniTest.expect.equality(type(hl.bg) == "number", true)
+
+  helpers.clear_hl("PinWordCword")
+end
+
+T["highlight applies cword with table spec"] = function()
+  local highlight = require("pinwords.highlight")
+
+  helpers.clear_hl("PinWordCword")
+  highlight.apply(1, { cword = { bg = "#00ffff", fg = "#000000", bold = true } })
+
+  local hl = vim.api.nvim_get_hl(0, { name = "PinWordCword", link = false })
+  MiniTest.expect.equality(hl.bg, 0x00ffff)
+  MiniTest.expect.equality(hl.fg, 0x000000)
+  MiniTest.expect.equality(hl.bold, true)
+
+  helpers.clear_hl("PinWordCword")
+end
+
+T["highlight uses default for unspecified slots"] = function()
+  local highlight = require("pinwords.highlight")
+
+  helpers.clear_hl("PinWord1")
+  helpers.clear_hl("PinWord2")
+  helpers.clear_hl("PinWord3")
+
+  -- Only specify slot 2
+  highlight.apply(3, { [2] = { bg = "#123456", fg = "#ffffff" } })
+
+  -- Slot 2 should have custom color (not blended because fg is specified)
+  local hl2 = vim.api.nvim_get_hl(0, { name = "PinWord2", link = false })
+  MiniTest.expect.equality(hl2.bg, 0x123456)
+  MiniTest.expect.equality(hl2.fg, 0xffffff)
+
+  -- Slots 1 and 3 should have default (blended) colors
+  local hl1 = vim.api.nvim_get_hl(0, { name = "PinWord1", link = false })
+  local hl3 = vim.api.nvim_get_hl(0, { name = "PinWord3", link = false })
+  MiniTest.expect.equality(type(hl1.bg) == "number", true)
+  MiniTest.expect.equality(type(hl3.bg) == "number", true)
+
+  helpers.clear_hl("PinWord1")
+  helpers.clear_hl("PinWord2")
+  helpers.clear_hl("PinWord3")
+end
+
 return T
