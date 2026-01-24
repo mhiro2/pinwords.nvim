@@ -42,20 +42,60 @@ local function remove_value(list, value)
 end
 
 local function sync_global_state()
-  vim.api.nvim_set_var("pinwords_global", global_state)
+  local ok, err = pcall(vim.api.nvim_set_var, "pinwords_global", global_state)
+  if not ok then
+    vim.notify("pinwords: failed to sync global state: " .. tostring(err), vim.log.levels.WARN)
+  end
+end
+
+---@param state table
+---@return boolean
+local function validate_global_state(state)
+  if type(state) ~= "table" then
+    return false
+  end
+  if type(state.slots) ~= "table" then
+    return false
+  end
+  -- Validate each slot entry
+  for slot, entry in pairs(state.slots) do
+    if type(slot) ~= "number" or slot < 1 then
+      return false
+    end
+    if type(entry) ~= "table" or type(entry.raw) ~= "string" or type(entry.pattern) ~= "string" then
+      return false
+    end
+  end
+  return true
 end
 
 -- Initialize global state from vim.g or create new
 function M.init_global_state()
   local ok, saved = pcall(vim.api.nvim_get_var, "pinwords_global")
   if ok and type(saved) == "table" then
-    global_state = saved
+    -- Validate saved state in detail
+    if validate_global_state(saved) then
+      global_state = saved
+    else
+      vim.notify("pinwords: saved state is invalid, resetting", vim.log.levels.WARN)
+      global_state = { slots = {} }
+    end
   else
     global_state = { slots = {} }
   end
 
+  -- Validate each field
   if type(global_state.slots) ~= "table" then
     global_state.slots = {}
+  end
+  if type(global_state.order) ~= "table" then
+    global_state.order = {}
+  end
+  if type(global_state.last_used) ~= "table" then
+    global_state.last_used = {}
+  end
+  if type(global_state.tick) ~= "number" then
+    global_state.tick = 0
   end
 end
 
@@ -374,6 +414,12 @@ end
 ---@return nil
 function M.set_win_state(win, state)
   vim.api.nvim_win_set_var(win, "pinwords", state)
+end
+
+---@return nil
+function M.teardown()
+  global_state = { slots = {} }
+  pcall(vim.api.nvim_del_var, "pinwords_global")
 end
 
 return M

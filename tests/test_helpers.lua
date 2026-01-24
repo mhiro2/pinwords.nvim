@@ -18,6 +18,8 @@ function M.create_test_set()
       pre_case = function()
         M.close_extra_windows()
         vim.cmd("enew!")
+        -- Clear any stray matchadd entries that are not tracked in pinwords state.
+        vim.fn.clearmatches()
 
         -- Clear global state before setup to ensure clean state per test
         require("pinwords.state").clear_all()
