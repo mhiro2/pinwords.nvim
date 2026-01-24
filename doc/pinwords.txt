@@ -9,7 +9,7 @@ REQUIREMENTS
   - Neovim >= 0.9
 
 SETUP                                                           *pinwords-setup*
-
+>lua
   require("pinwords").setup({
     slots = 9,
     whole_word = true,
@@ -19,6 +19,8 @@ SETUP                                                           *pinwords-setup*
       on_full = "replace_oldest", -- "replace_oldest" | "replace_last" | "no_op"
       toggle_same = true,
     },
+    -- Custom highlight colors (see |pinwords-colors|)
+    colors = nil,
     -- Optional picker integrations (see |pinwords-pickers|)
     telescope = {
       enabled = false,
@@ -27,6 +29,7 @@ SETUP                                                           *pinwords-setup*
       enabled = false,
     },
   })
+<
 
 PERSISTENCE                                                *pinwords-persistence*
 
@@ -62,17 +65,69 @@ COMMANDS                                                       *pinwords-command
   :UnpinAllWords         Clear all pinned words.
   :PinWordList           List active pins.
   :PinWordCwordToggle    Toggle cursor-word highlight (current window, incl. insert).
+  :PinWordNext [slot]    Jump to next pinned word occurrence.
+  :PinWordPrev [slot]    Jump to previous pinned word occurrence.
 
 API                                                             *pinwords-api*
 
-  require("pinwords").set()         -- auto allocation
+  require("pinwords").set()          -- auto allocation
   require("pinwords").set(slot)
-  require("pinwords").toggle()      -- alias for auto set
+  require("pinwords").toggle()       -- alias for auto set
   require("pinwords").cword_toggle() -- toggle cursor-word highlight
-  require("pinwords").unpin()       -- unpin word under cursor
+  require("pinwords").unpin()        -- unpin word under cursor
   require("pinwords").clear(slot)
   require("pinwords").clear_all()
   require("pinwords").list()
+  require("pinwords").jump_next()    -- jump to next pinned word
+  require("pinwords").jump_next(slot) -- jump to next occurrence of specific slot
+  require("pinwords").jump_prev()    -- jump to previous pinned word
+  require("pinwords").jump_prev(slot)
+
+CUSTOM COLORS                                                  *pinwords-colors*
+
+  Customize highlight colors per slot:
+>lua
+  require("pinwords").setup({
+    colors = {
+      [1] = "#ff6b6b",                           -- hex string
+      [2] = { bg = "#1dd1a1", fg = "#000000" },  -- with foreground color
+      [3] = { bg = "#54a0ff", bold = true },     -- with style attributes
+      cword = "#ffd166",                         -- cursor word color
+    },
+  })
+<
+  Color specification formats: ~
+    "#ff6b6b"                  Hex string (background color only)
+    { bg = "#ff6b6b" }         Table with background color
+    { bg = "#ff6b6b", fg = "#000000" }  With foreground color
+    { bg = "#ff6b6b", bold = true }     With style attributes
+
+  Available style attributes: ~
+    bg           Background color (hex string)
+    fg           Foreground color (hex string)
+    bold         Bold text
+    italic       Italic text
+    underline    Underlined text
+    strikethrough  Strikethrough text
+    ctermbg      Terminal background color (integer, auto-estimated if omitted)
+    ctermfg      Terminal foreground color (integer, auto-estimated if omitted)
+
+JUMP NAVIGATION                                                *pinwords-jump*
+
+  Jump between pinned word occurrences:
+>lua
+  -- Recommended key mappings
+  vim.keymap.set("n", "]p", function() require("pinwords").jump_next() end)
+  vim.keymap.set("n", "[p", function() require("pinwords").jump_prev() end)
+
+  -- Jump to specific slot (optional)
+  vim.keymap.set("n", "]1", function() require("pinwords").jump_next(1) end)
+  vim.keymap.set("n", "[1", function() require("pinwords").jump_prev(1) end)
+<
+  Behavior: ~
+    - Wraps at file boundaries (end -> beginning, beginning -> end)
+    - Supports count prefix (e.g., 3]p jumps 3 times)
+    - Integrates with jumplist (<C-o> to return)
 
 HIGHLIGHTS                                                     *pinwords-highlights*
 

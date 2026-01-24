@@ -1,7 +1,23 @@
 local M = {}
 
+---@class PinwordsColorSpec
+---@field bg? string         -- 背景色 (hex)
+---@field fg? string         -- 前景色 (hex)
+---@field bold? boolean
+---@field italic? boolean
+---@field underline? boolean
+---@field strikethrough? boolean
+---@field ctermbg? integer
+---@field ctermfg? integer
+
+---@alias PinwordsColor string | PinwordsColorSpec
+
+---@class PinwordsColorsConfig
+---@field [integer] PinwordsColor  -- スロット番号 => 色
+---@field cword? PinwordsColor     -- カーソル下単語の色
+
 ---@type string[]
-local palette = {
+local default_palette = {
   "#ff6b6b",
   "#feca57",
   "#1dd1a1",
@@ -14,7 +30,7 @@ local palette = {
 }
 
 ---@type integer[]
-local cterm_palette = {
+local default_cterm_palette = {
   196,
   214,
   46,
@@ -26,8 +42,8 @@ local cterm_palette = {
   251,
 }
 
-local cword_color = "#ffd166"
-local cword_cterm = 221
+local default_cword_color = "#ffd166"
+local default_cword_cterm = 221
 
 ---@param hex string
 ---@return integer, integer, integer
@@ -81,29 +97,137 @@ local function highlight_is_empty(group)
   return next(hl) == nil
 end
 
+---@param hex string
+---@return integer|nil
+local function hex_to_cterm(hex)
+  -- Simple approximation: map hex to nearest xterm-256 color
+  local r, g, b = hex_to_rgb(hex)
+  if r == g and g == b then
+    -- Grayscale
+    if r < 8 then
+      return 16
+    end
+    if r > 248 then
+      return 231
+    end
+    return math.floor((r - 8) / 247 * 24 + 0.5) + 232
+  end
+  -- Color cube
+  local function to_cube(v)
+    if v < 48 then
+      return 0
+    end
+    if v < 115 then
+      return 1
+    end
+    return math.floor((v - 35) / 40)
+  end
+  return 16 + 36 * to_cube(r) + 6 * to_cube(g) + to_cube(b)
+end
+
+---@param value PinwordsColor
+---@return PinwordsColorSpec
+local function normalize_color(value)
+  if type(value) == "string" then
+    return { bg = value }
+  end
+  return value
+end
+
+---@param spec PinwordsColorSpec
+---@param bg_hex string|nil
+---@param alpha number
+---@return PinwordsColorSpec
+local function apply_blend(spec, bg_hex, alpha)
+  if not bg_hex or not spec.bg then
+    return spec
+  end
+  -- Only blend if no fg is specified (preserve original behavior)
+  if spec.fg then
+    return spec
+  end
+  local result = vim.deepcopy(spec)
+  result.bg = blend_hex(spec.bg, bg_hex, alpha)
+  return result
+end
+
+---@param spec PinwordsColorSpec
+---@param default_cterm integer
+---@return table
+local function build_hl_opts(spec, default_cterm)
+  local opts = {}
+
+  if spec.bg then
+    opts.bg = spec.bg
+    opts.ctermbg = spec.ctermbg or hex_to_cterm(spec.bg) or default_cterm
+  else
+    opts.ctermbg = spec.ctermbg or default_cterm
+  end
+
+  if spec.fg then
+    opts.fg = spec.fg
+    opts.ctermfg = spec.ctermfg or hex_to_cterm(spec.fg)
+  elseif spec.ctermfg then
+    opts.ctermfg = spec.ctermfg
+  end
+
+  if spec.bold then
+    opts.bold = true
+  end
+  if spec.italic then
+    opts.italic = true
+  end
+  if spec.underline then
+    opts.underline = true
+  end
+  if spec.strikethrough then
+    opts.strikethrough = true
+  end
+
+  return opts
+end
+
 ---@param slots integer
+---@param colors? PinwordsColorsConfig
 ---@return nil
-function M.apply(slots)
+function M.apply(slots, colors)
   local bg_hex = normal_bg_hex()
   local alpha = 0.5
+  colors = colors or {}
+
   for i = 1, slots do
     local group = "PinWord" .. i
     if highlight_is_empty(group) then
-      local color = palette[i] or "#ffffff"
-      if bg_hex then
-        color = blend_hex(color, bg_hex, alpha)
+      local user_color = colors[i]
+      local spec
+
+      if user_color then
+        spec = normalize_color(user_color)
+      else
+        spec = { bg = default_palette[i] or "#ffffff" }
       end
-      local cterm = cterm_palette[i] or 15
-      vim.api.nvim_set_hl(0, group, { bg = color, ctermbg = cterm })
+
+      spec = apply_blend(spec, bg_hex, alpha)
+      local default_cterm = default_cterm_palette[i] or 15
+      local opts = build_hl_opts(spec, default_cterm)
+      vim.api.nvim_set_hl(0, group, opts)
     end
   end
 
-  if highlight_is_empty("PinWordCword") then
-    local color = cword_color
-    if bg_hex then
-      color = blend_hex(color, bg_hex, alpha)
+  local cword_group = "PinWordCword"
+  if highlight_is_empty(cword_group) then
+    local user_cword = colors.cword
+    local spec
+
+    if user_cword then
+      spec = normalize_color(user_cword)
+    else
+      spec = { bg = default_cword_color }
     end
-    vim.api.nvim_set_hl(0, "PinWordCword", { bg = color, ctermbg = cword_cterm })
+
+    spec = apply_blend(spec, bg_hex, alpha)
+    local opts = build_hl_opts(spec, default_cword_cterm)
+    vim.api.nvim_set_hl(0, cword_group, opts)
   end
 end
 

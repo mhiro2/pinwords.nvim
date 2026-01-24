@@ -96,6 +96,37 @@ require("pinwords").setup({
 | `on_full` | `replace_oldest`, `replace_last`, `no_op` | What to do when no empty slot is found (applies to `first_empty`/`cycle`). |
 | `toggle_same` | `true`, `false` | If the same pattern is already pinned, unpin it instead of adding a new slot. |
 
+#### Custom Highlight Colors
+
+Customize highlight colors per slot:
+
+```lua
+require("pinwords").setup({
+  colors = {
+    [1] = "#ff6b6b",                           -- hex string
+    [2] = { bg = "#1dd1a1", fg = "#000000" },  -- with foreground color
+    [3] = { bg = "#54a0ff", bold = true },     -- with style attributes
+    cword = "#ffd166",                         -- cursor word color
+  },
+})
+```
+
+Available style attributes: `bold`, `italic`, `underline`, `strikethrough`, `ctermbg`, `ctermfg`.
+
+#### Jump Navigation
+
+Jump between pinned word occurrences:
+
+```lua
+-- Recommended key mappings
+vim.keymap.set("n", "]p", function() require("pinwords").jump_next() end, { desc = "Next pinned word" })
+vim.keymap.set("n", "[p", function() require("pinwords").jump_prev() end, { desc = "Prev pinned word" })
+
+-- Jump to specific slot (optional)
+vim.keymap.set("n", "]1", function() require("pinwords").jump_next(1) end, { desc = "Next slot 1" })
+vim.keymap.set("n", "[1", function() require("pinwords").jump_prev(1) end, { desc = "Prev slot 1" })
+```
+
 #### Picker Integrations
 
 Enable auto-loading of optional picker extensions (disabled by default to avoid forcing dependencies at startup):
@@ -128,6 +159,8 @@ See the [Picker Integrations](#-picker-integrations) section for usage details.
 | `:UnpinAllWords`        | Clear all             |
 | `:PinWordList`          | List active pins      |
 | `:PinWordCwordToggle`   | Toggle cursor-word highlight (current window, follows cursor incl. insert) |
+| `:PinWordNext [slot]`   | Jump to next pinned word occurrence |
+| `:PinWordPrev [slot]`   | Jump to previous pinned word occurrence |
 
 ### Lua API
 
@@ -140,6 +173,10 @@ require("pinwords").unpin()        -- unpin word under cursor
 require("pinwords").clear(slot)
 require("pinwords").clear_all()
 require("pinwords").list()
+require("pinwords").jump_next()    -- jump to next pinned word
+require("pinwords").jump_next(slot) -- jump to next occurrence of specific slot
+require("pinwords").jump_prev()    -- jump to previous pinned word
+require("pinwords").jump_prev(slot)
 ```
 
 ## 🔍 Picker Integrations

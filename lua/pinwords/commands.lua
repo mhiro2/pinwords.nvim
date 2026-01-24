@@ -185,6 +185,30 @@ function M.setup(max_slots)
   vim.api.nvim_create_user_command("PinWordCwordToggle", function()
     require("pinwords").cword_toggle()
   end, { nargs = 0, force = true, desc = "Toggle cursor word highlight (window-local)." })
+
+  vim.api.nvim_create_user_command("PinWordNext", function(opts)
+    ---@cast opts PinwordsCommandOpts
+    local slot
+    if opts.args ~= "" then
+      slot = parse_slot(opts.args, max_slots, true)
+      if not slot then
+        return
+      end
+    end
+    require("pinwords").jump_next(slot)
+  end, { nargs = "?", force = true, desc = "Jump to next pinned word occurrence." })
+
+  vim.api.nvim_create_user_command("PinWordPrev", function(opts)
+    ---@cast opts PinwordsCommandOpts
+    local slot
+    if opts.args ~= "" then
+      slot = parse_slot(opts.args, max_slots, true)
+      if not slot then
+        return
+      end
+    end
+    require("pinwords").jump_prev(slot)
+  end, { nargs = "?", force = true, desc = "Jump to previous pinned word occurrence." })
 end
 
 return M
