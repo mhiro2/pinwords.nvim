@@ -179,4 +179,82 @@ T["UnpinWord with invalid slot shows error"] = function()
   MiniTest.expect.equality(slots[1].raw, "foo")
 end
 
+T["PinWordNext jumps to next occurrence"] = function()
+  helpers.setup_buffer({ "foo bar foo baz foo" })
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
+
+  require("pinwords").set(1, { raw = "foo" })
+
+  vim.cmd("PinWordNext")
+
+  local pos = vim.api.nvim_win_get_cursor(0)
+  MiniTest.expect.equality(pos[1], 1)
+  MiniTest.expect.equality(pos[2], 8)
+end
+
+T["PinWordPrev jumps to previous occurrence"] = function()
+  helpers.setup_buffer({ "foo bar foo baz foo" })
+  vim.api.nvim_win_set_cursor(0, { 1, 16 })
+
+  require("pinwords").set(1, { raw = "foo" })
+
+  vim.cmd("PinWordPrev")
+
+  local pos = vim.api.nvim_win_get_cursor(0)
+  MiniTest.expect.equality(pos[1], 1)
+  MiniTest.expect.equality(pos[2], 8)
+end
+
+T["PinWordNext with slot jumps to specific slot"] = function()
+  helpers.setup_buffer({ "foo bar baz foo bar" })
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
+
+  require("pinwords").set(1, { raw = "foo" })
+  require("pinwords").set(2, { raw = "bar" })
+
+  vim.cmd("PinWordNext 2")
+
+  local pos = vim.api.nvim_win_get_cursor(0)
+  MiniTest.expect.equality(pos[1], 1)
+  MiniTest.expect.equality(pos[2], 4) -- "foo [b]ar"
+end
+
+T["PinWordPrev with slot jumps to specific slot"] = function()
+  helpers.setup_buffer({ "foo bar baz foo bar" })
+  vim.api.nvim_win_set_cursor(0, { 1, 18 })
+
+  require("pinwords").set(1, { raw = "foo" })
+  require("pinwords").set(2, { raw = "bar" })
+
+  vim.cmd("PinWordPrev 1")
+
+  local pos = vim.api.nvim_win_get_cursor(0)
+  MiniTest.expect.equality(pos[1], 1)
+  MiniTest.expect.equality(pos[2], 12) -- "foo bar baz [f]oo"
+end
+
+T["PinWordNext with invalid slot shows error"] = function()
+  helpers.setup_buffer({ "foo bar baz" })
+  require("pinwords").set(1, { raw = "foo" })
+
+  helpers.with_notify_override(function(notified)
+    vim.cmd("PinWordNext 0")
+    vim.cmd("PinWordNext 100")
+
+    MiniTest.expect.equality(#notified > 0, true)
+  end)
+end
+
+T["PinWordPrev with invalid slot shows error"] = function()
+  helpers.setup_buffer({ "foo bar baz" })
+  require("pinwords").set(1, { raw = "foo" })
+
+  helpers.with_notify_override(function(notified)
+    vim.cmd("PinWordPrev 0")
+    vim.cmd("PinWordPrev 100")
+
+    MiniTest.expect.equality(#notified > 0, true)
+  end)
+end
+
 return T
