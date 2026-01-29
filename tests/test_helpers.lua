@@ -1,5 +1,11 @@
 local M = {}
 
+--- Flush any pending async operations (state sync, cword timer)
+function M.flush_async()
+  require("pinwords.state").flush_sync()
+  require("pinwords").flush_cword_timer()
+end
+
 ---@return nil
 function M.close_extra_windows()
   local wins = vim.api.nvim_list_wins()

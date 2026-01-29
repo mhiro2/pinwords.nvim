@@ -27,6 +27,7 @@ T["set_slot stores entry and syncs to global var"] = function()
   }
 
   state.set_slot(1, entry)
+  state.flush_sync()
 
   local slots = state.get_slots()
   MiniTest.expect.equality(slots[1].raw, "foo")
@@ -52,6 +53,7 @@ T["clear_slot removes entry from slots and order"] = function()
 
   state.set_slot(1, entry)
   state.touch_slot(1)
+  state.flush_sync()
 
   MiniTest.expect.equality(state.get_slots()[1].raw, "foo")
 
@@ -59,6 +61,7 @@ T["clear_slot removes entry from slots and order"] = function()
   MiniTest.expect.equality(#global1.order, 1)
 
   state.clear_slot(1)
+  state.flush_sync()
 
   MiniTest.expect.equality(state.get_slots()[1], nil)
 
@@ -75,11 +78,13 @@ T["clear_all resets all state"] = function()
   state.set_slot(2, { raw = "bar", pattern = "\\V\\c\\<bar\\>", hl_group = "PinWord2" })
   state.touch_slot(1)
   state.touch_slot(2)
+  state.flush_sync()
 
   MiniTest.expect.equality(state.get_slots()[1].raw, "foo")
   MiniTest.expect.equality(state.get_slots()[2].raw, "bar")
 
   state.clear_all()
+  state.flush_sync()
 
   MiniTest.expect.equality(next(state.get_slots()), nil)
 
@@ -156,6 +161,7 @@ T["touch_slot updates order and last_used"] = function()
 
   state.touch_slot(1)
   state.touch_slot(2)
+  state.flush_sync()
 
   local global = vim.g.pinwords_global
   MiniTest.expect.equality(#global.order, 2)
@@ -189,6 +195,7 @@ T["touch_slot removes existing entry from order before appending"] = function()
   state.touch_slot(1)
   state.touch_slot(2)
   state.touch_slot(1)
+  state.flush_sync()
 
   local global = vim.g.pinwords_global
   MiniTest.expect.equality(#global.order, 2)
@@ -357,8 +364,10 @@ T["prune_global_state removes slots above max"] = function()
   state.touch_slot(1)
   state.touch_slot(5)
   state.touch_slot(10)
+  state.flush_sync()
 
   state.prune_global_state(3)
+  state.flush_sync()
 
   local slots = state.get_slots()
   MiniTest.expect.equality(slots[1].raw, "a")
@@ -381,8 +390,10 @@ T["prune_global_state removes large slots from order"] = function()
   state.touch_slot(5)
   state.touch_slot(1)
   state.touch_slot(2)
+  state.flush_sync()
 
   state.prune_global_state(3)
+  state.flush_sync()
 
   local global = vim.g.pinwords_global
   MiniTest.expect.equality(#global.order, 2)
@@ -400,8 +411,10 @@ T["prune_global_state removes large slots from last_used"] = function()
   state.set_slot(5, { raw = "e", pattern = "e", hl_group = "PinWord5" })
   state.touch_slot(5)
   state.touch_slot(1)
+  state.flush_sync()
 
   state.prune_global_state(3)
+  state.flush_sync()
 
   local global = vim.g.pinwords_global
   MiniTest.expect.equality(global.last_used[1], global.tick)

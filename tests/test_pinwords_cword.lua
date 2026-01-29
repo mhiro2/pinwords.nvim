@@ -15,6 +15,7 @@ T["cword toggle follows cursor in window"] = function()
 
   vim.api.nvim_win_set_cursor(0, { 1, 4 })
   vim.cmd("doautocmd <nomodeline> CursorMoved")
+  pinwords.flush_cword_timer()
 
   match = helpers.find_match("PinWordCword")
   MiniTest.expect.equality(match ~= nil, true)
@@ -55,6 +56,7 @@ T["cword clears when cursor moves to empty word"] = function()
   -- Move cursor to an empty line so expand("<cword>") returns empty string.
   vim.api.nvim_win_set_cursor(0, { 2, 0 })
   vim.cmd("doautocmd <nomodeline> CursorMoved")
+  pinwords.flush_cword_timer()
 
   match = helpers.find_match("PinWordCword")
   -- When cursor is on an empty line, cword match should be cleared.
@@ -63,6 +65,7 @@ T["cword clears when cursor moves to empty word"] = function()
   -- When moving to a non-empty word again, cword match should be reapplied.
   vim.api.nvim_win_set_cursor(0, { 1, 4 }) -- on "bar"
   vim.cmd("doautocmd <nomodeline> CursorMoved")
+  pinwords.flush_cword_timer()
   match = helpers.find_match("PinWordCword")
   MiniTest.expect.equality(match ~= nil, true)
   MiniTest.expect.equality(match.pattern, "\\V\\c\\<bar\\>")
@@ -157,6 +160,7 @@ T["cword state cleanup after window close"] = function()
   vim.api.nvim_set_current_win(win1)
   vim.api.nvim_win_set_cursor(win1, { 1, 4 })
   vim.cmd("doautocmd <nomodeline> CursorMoved")
+  require("pinwords").flush_cword_timer()
 
   -- Verify win1 cword still works
   local match1_after = helpers.find_match("PinWordCword")

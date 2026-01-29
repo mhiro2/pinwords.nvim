@@ -31,20 +31,39 @@ local global_state = {
 
 local M = {}
 
----@param list integer[]
----@param value integer
-local function remove_value(list, value)
-  for i = #list, 1, -1 do
-    if list[i] == value then
-      table.remove(list, i)
-    end
-  end
-end
+local sync_pending = false
 
-local function sync_global_state()
+local function do_sync()
+  sync_pending = false
   local ok, err = pcall(vim.api.nvim_set_var, "pinwords_global", global_state)
   if not ok then
     vim.notify("pinwords: failed to sync global state: " .. tostring(err), vim.log.levels.WARN)
+  end
+end
+
+local function schedule_sync()
+  if sync_pending then
+    return
+  end
+  sync_pending = true
+  vim.schedule(do_sync)
+end
+
+--- Force immediate sync if pending (for testing)
+function M.flush_sync()
+  if sync_pending then
+    do_sync()
+  end
+end
+
+---@param list integer[]
+---@param value integer
+local function remove_value(list, value)
+  for i = 1, #list do
+    if list[i] == value then
+      table.remove(list, i)
+      return
+    end
   end
 end
 
@@ -71,6 +90,10 @@ end
 
 -- Initialize global state from vim.g or create new
 function M.init_global_state()
+  -- Flush any pending sync to ensure we load the latest state
+  if sync_pending then
+    do_sync()
+  end
   local ok, saved = pcall(vim.api.nvim_get_var, "pinwords_global")
   if ok and type(saved) == "table" then
     -- Validate saved state in detail
@@ -141,7 +164,7 @@ function M.prune_global_state(max_slots)
   end
 
   if changed then
-    sync_global_state()
+    schedule_sync()
   end
 end
 
@@ -227,7 +250,7 @@ end
 ---@return nil
 function M.set_slots(slots)
   global_state.slots = slots
-  sync_global_state()
+  schedule_sync()
 end
 
 ---@param slot integer
@@ -242,7 +265,7 @@ function M.touch_slot(slot)
   global_state.tick = tick
   last_used[slot] = tick
 
-  sync_global_state()
+  schedule_sync()
 end
 
 ---@param slot integer
@@ -250,7 +273,7 @@ end
 ---@return nil
 function M.set_slot(slot, entry)
   global_state.slots[slot] = entry
-  sync_global_state()
+  schedule_sync()
 end
 
 ---@param slot integer
@@ -263,7 +286,7 @@ function M.clear_slot(slot)
   if type(global_state.last_used) == "table" then
     global_state.last_used[slot] = nil
   end
-  sync_global_state()
+  schedule_sync()
 end
 
 ---@return nil
@@ -272,7 +295,7 @@ function M.clear_all()
   global_state.order = {}
   global_state.last_used = {}
   global_state.tick = 0
-  sync_global_state()
+  schedule_sync()
 end
 
 ---@param raw_or_pattern string
@@ -290,6 +313,18 @@ end
 -- Prefer find_slot_by_raw_or_pattern for clarity.
 ---@deprecated
 M.find_slot_by_pattern = M.find_slot_by_raw_or_pattern
+
+---@param raw string
+---@param pattern_text string
+---@return integer|nil
+function M.find_slot_by_raw_and_pattern(raw, pattern_text)
+  for slot, entry in pairs(global_state.slots) do
+    if entry.raw == raw or entry.pattern == raw or entry.raw == pattern_text or entry.pattern == pattern_text then
+      return slot
+    end
+  end
+  return nil
+end
 
 ---@param max_slots integer
 ---@return integer|nil
@@ -330,35 +365,16 @@ local function find_lru_slot(max_slots)
     return empty
   end
 
-  local slots = global_state.slots
-  local last_used = global_state.last_used
-  if type(last_used) == "table" then
-    local oldest_slot
-    local oldest_time
-    for slot in pairs(slots) do
-      local ts = last_used[slot] or 0
-      if not oldest_time or ts < oldest_time then
-        oldest_time = ts
-        oldest_slot = slot
-      end
-    end
-    if oldest_slot then
-      return oldest_slot
-    end
-  end
-
   local order = global_state.order
   if type(order) == "table" and #order > 0 then
     return order[1]
   end
 
-  local fallback
-  for slot in pairs(slots) do
-    if not fallback or slot < fallback then
-      fallback = slot
-    end
+  -- Fallback: return any slot
+  for slot in pairs(global_state.slots) do
+    return slot
   end
-  return fallback
+  return nil
 end
 
 ---@param strategy string
