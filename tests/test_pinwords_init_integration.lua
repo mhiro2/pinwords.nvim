@@ -77,15 +77,18 @@ T["setup preserves existing global state"] = function()
   helpers.setup_buffer({ "foo bar" })
 
   local pinwords = require("pinwords")
+  local state = require("pinwords.state")
 
   pinwords.setup({ slots = 3 })
   pinwords.set(1, { raw = "foo" })
+  state.flush_sync()
 
   local global_before = vim.g.pinwords_global
   MiniTest.expect.equality(type(global_before), "table")
   MiniTest.expect.equality(global_before.slots[1].raw, "foo")
 
   pinwords.setup({ slots = 5, auto_allocation = { strategy = "cycle" } })
+  state.flush_sync()
 
   local global_after = vim.g.pinwords_global
   MiniTest.expect.equality(global_after.slots[1].raw, "foo")

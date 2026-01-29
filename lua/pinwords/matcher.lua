@@ -7,6 +7,15 @@ local function warn(msg)
   vim.notify("pinwords: " .. msg, vim.log.levels.WARN)
 end
 
+---@param fn fun(win: integer): nil
+local function for_each_valid_window(fn)
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_is_valid(win) then
+      fn(win)
+    end
+  end
+end
+
 ---@param buf integer
 ---@return integer[]
 local function wins_showing_buf(buf)
@@ -136,32 +145,24 @@ end
 ---@param entry PinwordsSlot
 ---@return nil
 function M.apply_slot_globally(slot, entry)
-  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_is_loaded(buf) then
-      for _, win in ipairs(wins_showing_buf(buf)) do
-        M.apply_slot_for_window(win, slot, entry)
-      end
-    end
-  end
+  for_each_valid_window(function(win)
+    M.apply_slot_for_window(win, slot, entry)
+  end)
 end
 
 ---@param slot integer
 ---@return nil
 function M.clear_slot_globally(slot)
-  for _, win in ipairs(vim.api.nvim_list_wins()) do
-    if vim.api.nvim_win_is_valid(win) then
-      clear_slot_for_window(win, slot)
-    end
-  end
+  for_each_valid_window(function(win)
+    clear_slot_for_window(win, slot)
+  end)
 end
 
 ---@return nil
 function M.clear_all_globally()
-  for _, win in ipairs(vim.api.nvim_list_wins()) do
-    if vim.api.nvim_win_is_valid(win) then
-      clear_all_for_window(win)
-    end
-  end
+  for_each_valid_window(function(win)
+    clear_all_for_window(win)
+  end)
 end
 
 ---@param win integer

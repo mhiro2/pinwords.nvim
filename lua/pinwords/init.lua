@@ -234,10 +234,12 @@ local function sanitize_config(opts)
   return cfg
 end
 
--- Windows where cword highlight is enabled.
--- Key: winid, Value: true
+-- Windows where cword highlight is enabled (winid -> true)
 ---@type table<integer, boolean>
 local cword_enabled_wins = {}
+
+local cword_timer = nil
+local CWORD_DEBOUNCE_MS = 50
 
 ---@param win integer
 ---@return boolean
@@ -245,7 +247,11 @@ local function is_cword_enabled(win)
   if cword_enabled_wins[win] ~= true then
     return false
   end
-  return vim.api.nvim_win_is_valid(win)
+  if not vim.api.nvim_win_is_valid(win) then
+    cword_enabled_wins[win] = nil -- Lazy cleanup
+    return false
+  end
+  return true
 end
 
 ---@return nil
@@ -382,9 +388,6 @@ function M.setup(opts)
         win = vim.api.nvim_get_current_win()
       end
 
-      -- Clean up stale window entries before processing
-      cleanup_stale_cword_wins()
-
       matcher.reapply_all_for_window(win)
       if is_cword_enabled(win) then
         update_cword_for_window(win)
@@ -398,12 +401,27 @@ function M.setup(opts)
       if next(cword_enabled_wins) == nil then
         return
       end
-
       local win = vim.api.nvim_get_current_win()
       if not is_cword_enabled(win) then
         return
       end
-      update_cword_for_window(win)
+      if cword_timer then
+        cword_timer:stop()
+      end
+      if not cword_timer then
+        cword_timer = vim.uv.new_timer()
+      end
+      cword_timer:start(
+        CWORD_DEBOUNCE_MS,
+        0,
+        vim.schedule_wrap(function()
+          -- Use captured win, not current win at timer fire time
+          if not is_cword_enabled(win) then
+            return
+          end
+          update_cword_for_window(win)
+        end)
+      )
     end,
   })
 
@@ -451,17 +469,6 @@ local function apply_slot(raw, slot, opts)
   matcher.apply_slot_globally(slot, entry)
 end
 
----@param raw string
----@param pattern_text string
----@return integer|nil
-local function find_existing_slot(raw, pattern_text)
-  local existing = state.find_slot_by_raw_or_pattern(pattern_text)
-  if not existing then
-    existing = state.find_slot_by_raw_or_pattern(raw)
-  end
-  return existing
-end
-
 ---@param slot? integer
 ---@param opts? PinwordsSetOpts
 ---@return nil
@@ -482,7 +489,7 @@ function M.set(slot, opts)
   local pattern_text = build_pattern(raw, opts)
 
   if config.auto_allocation.toggle_same then
-    local existing = find_existing_slot(raw, pattern_text)
+    local existing = state.find_slot_by_raw_and_pattern(raw, pattern_text)
     if existing then
       M.clear(existing)
       return
@@ -563,7 +570,7 @@ function M.unpin()
   end
 
   local pattern_text = build_pattern(raw)
-  local slot = find_existing_slot(raw, pattern_text)
+  local slot = state.find_slot_by_raw_and_pattern(raw, pattern_text)
   if slot then
     M.clear(slot)
   end
@@ -596,6 +603,17 @@ function M.jump_prev(slot)
     return false
   end
   return jump.prev(slot)
+end
+
+--- Flush debounced cword update immediately (for testing)
+function M.flush_cword_timer()
+  if cword_timer then
+    cword_timer:stop()
+  end
+  local win = vim.api.nvim_get_current_win()
+  if is_cword_enabled(win) then
+    update_cword_for_window(win)
+  end
 end
 
 return M
