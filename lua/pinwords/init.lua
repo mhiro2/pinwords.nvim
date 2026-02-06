@@ -449,7 +449,9 @@ function M.setup(opts)
   -- Load Telescope extension if enabled and available
   if config.telescope.enabled then
     local ok, telescope = pcall(require, "telescope")
-    if ok and telescope.load_extension then
+    if not ok then
+      warn("telescope.enabled is true but telescope.nvim is not available")
+    elseif telescope.load_extension then
       pcall(telescope.load_extension, "pinwords")
     end
   end
