@@ -159,6 +159,10 @@ end
 ---@param opts? PinwordsConfig
 ---@return PinwordsConfig
 local function sanitize_config(opts)
+  if opts ~= nil and type(opts) ~= "table" then
+    warn("setup opts must be a table; fallback to default")
+    opts = {}
+  end
   local cfg = vim.tbl_deep_extend("force", default_config, opts or {})
 
   local valid_strategies = { first_empty = true, cycle = true, lru = true }
