@@ -27,8 +27,8 @@ local function parse_slot(args, max_slots, required)
     return nil
   end
 
-  if slot < 1 or slot > max_slots then
-    vim.notify("pinwords: slot must be between 1 and " .. max_slots, vim.log.levels.WARN)
+  if slot % 1 ~= 0 or slot < 1 or slot > max_slots then
+    vim.notify("pinwords: slot must be an integer between 1 and " .. max_slots, vim.log.levels.WARN)
     return nil
   end
 

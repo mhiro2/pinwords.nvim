@@ -212,7 +212,7 @@ T["jump_next with invalid slot returns false"] = function()
   local notified = false
   local orig_notify = vim.notify
   vim.notify = function(msg, _level)
-    if msg:match("must be between") then
+    if msg:match("must be an integer between") then
       notified = true
     end
   end
