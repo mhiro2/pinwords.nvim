@@ -83,6 +83,21 @@ T["set with invalid slot does nothing"] = function()
   MiniTest.expect.equality(next(slots), nil)
 end
 
+T["set with float slot does nothing"] = function()
+  helpers.setup_buffer({ "foo bar", "baz" })
+
+  local pinwords = require("pinwords")
+  helpers.with_notify_override(function(notified)
+    pinwords.set(1.5)
+    pinwords.set(2.7)
+
+    MiniTest.expect.equality(#notified >= 2, true)
+  end)
+
+  local slots = pinwords.list()
+  MiniTest.expect.equality(next(slots), nil)
+end
+
 T["clear with invalid slot does nothing"] = function()
   helpers.setup_buffer({ "foo bar", "baz" })
 

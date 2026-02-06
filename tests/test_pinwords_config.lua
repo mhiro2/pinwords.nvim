@@ -237,4 +237,60 @@ T["setup warns on non-table colors"] = function()
   MiniTest.expect.equality(has_warning, true)
 end
 
+T["setup with non-table opts does not crash"] = function()
+  local pinwords = require("pinwords")
+
+  helpers.with_notify_override(function(notified)
+    local ok = pcall(pinwords.setup, "invalid")
+    MiniTest.expect.equality(ok, true)
+
+    local has_warning = false
+    for _, n in ipairs(notified) do
+      if n.msg:match("setup opts must be a table") then
+        has_warning = true
+      end
+    end
+    MiniTest.expect.equality(has_warning, true)
+  end)
+
+  -- Should still work after invalid setup
+  helpers.setup_buffer({ "foo bar" })
+  local ok = pcall(pinwords.set, 1)
+  MiniTest.expect.equality(ok, true)
+end
+
+T["setup with numeric opts does not crash"] = function()
+  local pinwords = require("pinwords")
+
+  helpers.with_notify_override(function(notified)
+    local ok = pcall(pinwords.setup, 42)
+    MiniTest.expect.equality(ok, true)
+
+    local has_warning = false
+    for _, n in ipairs(notified) do
+      if n.msg:match("setup opts must be a table") then
+        has_warning = true
+      end
+    end
+    MiniTest.expect.equality(has_warning, true)
+  end)
+end
+
+T["setup with boolean opts does not crash"] = function()
+  local pinwords = require("pinwords")
+
+  helpers.with_notify_override(function(notified)
+    local ok = pcall(pinwords.setup, true)
+    MiniTest.expect.equality(ok, true)
+
+    local has_warning = false
+    for _, n in ipairs(notified) do
+      if n.msg:match("setup opts must be a table") then
+        has_warning = true
+      end
+    end
+    MiniTest.expect.equality(has_warning, true)
+  end)
+end
+
 return T

@@ -529,4 +529,91 @@ T["find_slot_by_pattern is deprecated but still works"] = function()
   MiniTest.expect.equality(slot, 1)
 end
 
+T["find_slot_by_raw_and_pattern matches both raw and pattern"] = function()
+  helpers.setup_buffer({ "test" })
+
+  local state = require("pinwords.state")
+  state.clear_all()
+
+  state.set_slot(1, {
+    raw = "foo",
+    pattern = "\\V\\c\\<foo\\>",
+    hl_group = "PinWord1",
+  })
+
+  local slot = state.find_slot_by_raw_and_pattern("foo", "\\V\\c\\<foo\\>")
+  MiniTest.expect.equality(slot, 1)
+end
+
+T["find_slot_by_raw_and_pattern matches by raw alone"] = function()
+  helpers.setup_buffer({ "test" })
+
+  local state = require("pinwords.state")
+  state.clear_all()
+
+  state.set_slot(1, {
+    raw = "foo",
+    pattern = "\\V\\C\\<foo\\>",
+    hl_group = "PinWord1",
+  })
+
+  -- Same raw but different pattern (case-insensitive vs case-sensitive)
+  local slot = state.find_slot_by_raw_and_pattern("foo", "\\V\\c\\<foo\\>")
+  MiniTest.expect.equality(slot, 1)
+end
+
+T["find_slot_by_raw_and_pattern matches by pattern alone"] = function()
+  helpers.setup_buffer({ "test" })
+
+  local state = require("pinwords.state")
+  state.clear_all()
+
+  state.set_slot(1, {
+    raw = "foo",
+    pattern = "\\V\\c\\<foo\\>",
+    hl_group = "PinWord1",
+  })
+
+  -- Different raw but same pattern
+  local slot = state.find_slot_by_raw_and_pattern("bar", "\\V\\c\\<foo\\>")
+  MiniTest.expect.equality(slot, 1)
+end
+
+T["find_slot_by_raw_and_pattern does not cross-match entries"] = function()
+  helpers.setup_buffer({ "test" })
+
+  local state = require("pinwords.state")
+  state.clear_all()
+
+  state.set_slot(1, {
+    raw = "foo",
+    pattern = "\\V\\c\\<foo\\>",
+    hl_group = "PinWord1",
+  })
+  state.set_slot(2, {
+    raw = "bar",
+    pattern = "\\V\\c\\<bar\\>",
+    hl_group = "PinWord2",
+  })
+
+  -- Neither raw nor pattern matches any single entry
+  local slot = state.find_slot_by_raw_and_pattern("baz", "\\V\\c\\<qux\\>")
+  MiniTest.expect.equality(slot, nil)
+end
+
+T["set_win_state does not error on invalid window"] = function()
+  helpers.setup_buffer({ "test" })
+
+  local state = require("pinwords.state")
+  local fake_win = 999999
+
+  MiniTest.expect.equality(vim.api.nvim_win_is_valid(fake_win), false)
+
+  local ok = pcall(state.set_win_state, fake_win, {
+    match_ids = {},
+    cword = { enabled = false },
+  })
+  MiniTest.expect.equality(ok, true)
+end
+
 return T

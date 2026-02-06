@@ -163,6 +163,20 @@ T["PinWord with invalid slot shows error"] = function()
   MiniTest.expect.equality(next(slots), nil)
 end
 
+T["PinWord with float slot shows error"] = function()
+  helpers.setup_buffer({ "foo bar baz" })
+
+  helpers.with_notify_override(function(notified)
+    vim.cmd("PinWord 1.5")
+    vim.cmd("PinWord 2.7")
+
+    MiniTest.expect.equality(#notified >= 2, true)
+  end)
+
+  local slots = require("pinwords").list()
+  MiniTest.expect.equality(next(slots), nil)
+end
+
 T["UnpinWord with invalid slot shows error"] = function()
   helpers.setup_buffer({ "foo bar baz" })
   require("pinwords").set(1)
