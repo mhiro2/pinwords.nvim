@@ -429,7 +429,7 @@ end
 ---@param state PinwordsWinState
 ---@return nil
 function M.set_win_state(win, state)
-  vim.api.nvim_win_set_var(win, "pinwords", state)
+  pcall(vim.api.nvim_win_set_var, win, "pinwords", state)
 end
 
 ---@return nil
