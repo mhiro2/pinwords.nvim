@@ -281,8 +281,8 @@ local function valid_slot(slot)
     return false
   end
 
-  if slot < 1 or slot > config.slots then
-    vim.notify("pinwords: slot must be between 1 and " .. config.slots, vim.log.levels.WARN)
+  if slot % 1 ~= 0 or slot < 1 or slot > config.slots then
+    vim.notify("pinwords: slot must be an integer between 1 and " .. config.slots, vim.log.levels.WARN)
     return false
   end
 
