@@ -13,6 +13,7 @@ Unlike navigation-oriented word highlighters, pinwords lets you **explicitly mar
 
 - 🔢 **Slot-based highlights** (default: 1–9)
 - 🧷 **Auto allocation** for single-key pinning
+- ✨ **Visual flash feedback** on pin/unpin success
 - 📌 **Persistent** highlights (until cleared; global across all buffers, not saved across sessions)
 - 🧠 Designed for **thinking, reading, and reviewing**, not navigation
 - 🪟 Correct behavior across **split windows**
@@ -112,6 +113,30 @@ require("pinwords").setup({
 ```
 
 Available style attributes: `bold`, `italic`, `underline`, `strikethrough`, `ctermbg`, `ctermfg`.
+
+#### Visual Flash Feedback
+
+Show a short flash when pin/unpin operations succeed:
+
+```lua
+require("pinwords").setup({
+  flash = {
+    enabled = true,
+    timeout_ms = 120,
+    hl_group = "PinWordFlash",
+    priority = 250,
+  },
+})
+```
+
+| Option | Type | Default | Behavior |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `true` | Enables/disables flash feedback. |
+| `timeout_ms` | integer | `120` | Flash duration in milliseconds. |
+| `hl_group` | string | `PinWordFlash` | Highlight group used for flash. |
+| `priority` | integer | `250` | Match priority for flash highlighting. |
+
+Default `PinWordFlash` is linked to `IncSearch`.
 
 #### Jump Navigation
 
@@ -257,6 +282,7 @@ end, { desc = "Snacks: Pinned words" })
 ```vim
 PinWord1 .. PinWord9
 PinWordCword
+PinWordFlash
 ```
 
 Fully customizable via standard highlight overrides.
