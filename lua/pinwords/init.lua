@@ -6,6 +6,16 @@ local pattern = require("pinwords.pattern")
 local state = require("pinwords.state")
 
 local M = {}
+local AUGROUP_NAME = "PinWords"
+local COMMAND_NAMES = {
+  "PinWord",
+  "UnpinWord",
+  "UnpinAllWords",
+  "PinWordList",
+  "PinWordCwordToggle",
+  "PinWordNext",
+  "PinWordPrev",
+}
 
 ---@param msg string
 local function warn(msg)
@@ -245,6 +255,20 @@ local cword_enabled_wins = {}
 local cword_timer = nil
 local CWORD_DEBOUNCE_MS = 50
 
+---@return nil
+local function stop_cword_timer()
+  if not cword_timer then
+    return
+  end
+  pcall(function()
+    cword_timer:stop()
+  end)
+  pcall(function()
+    cword_timer:close()
+  end)
+  cword_timer = nil
+end
+
 ---@param win integer
 ---@return boolean
 local function is_cword_enabled(win)
@@ -382,7 +406,7 @@ function M.setup(opts)
     end
   end
 
-  local group = vim.api.nvim_create_augroup("PinWords", { clear = true })
+  local group = vim.api.nvim_create_augroup(AUGROUP_NAME, { clear = true })
 
   vim.api.nvim_create_autocmd({ "BufWinEnter", "WinEnter" }, {
     group = group,
@@ -620,6 +644,30 @@ function M.flush_cword_timer()
   if is_cword_enabled(win) then
     update_cword_for_window(win)
   end
+end
+
+---@return nil
+function M.teardown()
+  stop_cword_timer()
+  pcall(vim.api.nvim_del_augroup_by_name, AUGROUP_NAME)
+
+  matcher.clear_all_globally()
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_is_valid(win) then
+      matcher.clear_cword_for_window(win)
+
+      local win_state = state.get_win_state(win)
+      win_state.cword = { enabled = false }
+      state.set_win_state(win, win_state)
+    end
+  end
+
+  for _, command_name in ipairs(COMMAND_NAMES) do
+    pcall(vim.api.nvim_del_user_command, command_name)
+  end
+
+  cword_enabled_wins = {}
+  state.teardown()
 end
 
 return M

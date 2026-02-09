@@ -3,6 +3,17 @@ local helpers = require("tests.test_helpers")
 
 local T = helpers.create_test_set()
 
+---@return boolean
+local function has_pinwords_autocmds()
+  local autocmds = vim.api.nvim_get_autocmds({})
+  for _, autocmd in ipairs(autocmds) do
+    if autocmd.group_name == "PinWords" then
+      return true
+    end
+  end
+  return false
+end
+
 T["setup can be called multiple times"] = function()
   helpers.setup_buffer({ "foo bar" })
 
@@ -196,9 +207,7 @@ T["setup creates autocmd group"] = function()
   local pinwords = require("pinwords")
   pinwords.setup()
 
-  local ok, groups = pcall(vim.api.nvim_get_autocmds, { group = "PinWords" })
-  MiniTest.expect.equality(ok, true)
-  MiniTest.expect.equality(#groups > 0, true)
+  MiniTest.expect.equality(has_pinwords_autocmds(), true)
 end
 
 T["setup registers commands"] = function()
@@ -361,6 +370,56 @@ T["clear_all with autocmd"] = function()
     end)
     MiniTest.expect.equality(count, 0)
   end
+end
+
+T["teardown removes runtime resources"] = function()
+  helpers.setup_buffer({ "foo bar baz" })
+
+  local pinwords = require("pinwords")
+  pinwords.setup({ slots = 3 })
+
+  pinwords.set(1, { raw = "foo" })
+  pinwords.cword_toggle()
+  vim.api.nvim_exec_autocmds("CursorMoved", { modeline = false })
+  pinwords.flush_cword_timer()
+
+  helpers.open_vsplit()
+  pinwords.set(2, { raw = "bar" })
+
+  MiniTest.expect.equality(has_pinwords_autocmds(), true)
+
+  local ok_before, commands_before = pcall(vim.api.nvim_get_commands, { builtin = false })
+  MiniTest.expect.equality(ok_before, true)
+  MiniTest.expect.equality(commands_before["PinWord"] ~= nil, true)
+
+  pinwords.teardown()
+
+  MiniTest.expect.equality(has_pinwords_autocmds(), false)
+
+  local ok_after, commands_after = pcall(vim.api.nvim_get_commands, { builtin = false })
+  MiniTest.expect.equality(ok_after, true)
+  MiniTest.expect.equality(commands_after["PinWord"], nil)
+  MiniTest.expect.equality(commands_after["UnpinWord"], nil)
+  MiniTest.expect.equality(commands_after["UnpinAllWords"], nil)
+  MiniTest.expect.equality(commands_after["PinWordList"], nil)
+  MiniTest.expect.equality(commands_after["PinWordCwordToggle"], nil)
+  MiniTest.expect.equality(commands_after["PinWordNext"], nil)
+  MiniTest.expect.equality(commands_after["PinWordPrev"], nil)
+
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    local count = vim.api.nvim_win_call(win, function()
+      return helpers.match_count()
+    end)
+    MiniTest.expect.equality(count, 0)
+  end
+
+  local slots = pinwords.list()
+  MiniTest.expect.equality(next(slots), nil)
+
+  -- cword toggle should enable from clean state after teardown.
+  pinwords.cword_toggle()
+  MiniTest.expect.equality(helpers.find_match("PinWordCword") ~= nil, true)
+  pinwords.cword_toggle()
 end
 
 return T
