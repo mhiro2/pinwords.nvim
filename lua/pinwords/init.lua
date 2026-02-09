@@ -1,4 +1,5 @@
 local commands = require("pinwords.commands")
+local flash = require("pinwords.flash")
 local highlight = require("pinwords.highlight")
 local jump = require("pinwords.jump")
 local matcher = require("pinwords.matcher")
@@ -44,6 +45,7 @@ end
 ---@field case_sensitive boolean
 ---@field auto_allocation PinwordsAutoAllocation
 ---@field colors? PinwordsColorsConfig
+---@field flash PinwordsFlashConfig
 ---@field telescope PinwordsTelescopeConfig
 ---@field snacks PinwordsSnacksConfig
 
@@ -57,6 +59,12 @@ end
 
 ---@class PinwordsSnacksConfig
 ---@field enabled boolean
+
+---@class PinwordsFlashConfig
+---@field enabled boolean
+---@field timeout_ms integer
+---@field hl_group string
+---@field priority integer
 
 ---@alias PinwordsAutoAllocationStrategy
 ---| '"first_empty"'
@@ -84,6 +92,12 @@ local default_config = {
     toggle_same = true,
   },
   colors = nil,
+  flash = {
+    enabled = true,
+    timeout_ms = 120,
+    hl_group = "PinWordFlash",
+    priority = 250,
+  },
   telescope = {
     enabled = false,
   },
@@ -235,6 +249,27 @@ local function sanitize_config(opts)
     end, default_config.snacks.enabled, "snacks.enabled must be boolean; fallback to default")
   end
 
+  if type(cfg.flash) ~= "table" then
+    warn("flash must be a table; fallback to default")
+    cfg.flash = vim.deepcopy(default_config.flash)
+  else
+    cfg.flash.enabled = validate_field(cfg.flash.enabled, function(v)
+      return type(v) == "boolean"
+    end, default_config.flash.enabled, "flash.enabled must be boolean; fallback to default")
+
+    cfg.flash.timeout_ms = validate_field(cfg.flash.timeout_ms, function(v)
+      return type(v) == "number" and v >= 1 and v % 1 == 0
+    end, default_config.flash.timeout_ms, "flash.timeout_ms must be a positive integer; fallback to default")
+
+    cfg.flash.hl_group = validate_field(cfg.flash.hl_group, function(v)
+      return type(v) == "string" and v ~= ""
+    end, default_config.flash.hl_group, "flash.hl_group must be a non-empty string; fallback to default")
+
+    cfg.flash.priority = validate_field(cfg.flash.priority, function(v)
+      return type(v) == "number" and v % 1 == 0
+    end, default_config.flash.priority, "flash.priority must be an integer; fallback to default")
+  end
+
   -- Validate colors
   if cfg.colors ~= nil then
     if type(cfg.colors) ~= "table" then
@@ -383,6 +418,21 @@ local function update_cword_for_window(win)
   state.set_win_state(win, win_state)
 end
 
+---@param pattern_text string|nil
+---@return nil
+local function flash_feedback(pattern_text)
+  if type(pattern_text) ~= "string" or pattern_text == "" then
+    return
+  end
+
+  local win = vim.api.nvim_get_current_win()
+  if not vim.api.nvim_win_is_valid(win) then
+    return
+  end
+
+  flash.flash_pattern(win, pattern_text)
+end
+
 ---@param opts? PinwordsConfig
 ---@return nil
 function M.setup(opts)
@@ -390,6 +440,7 @@ function M.setup(opts)
 
   -- Initialize global state
   state.init_global_state()
+  flash.setup(config.flash)
 
   highlight.apply(config.slots, config.colors)
   commands.setup(config.slots)
@@ -466,6 +517,7 @@ function M.setup(opts)
       local win = tonumber(args.match)
       if win then
         cword_enabled_wins[win] = nil
+        flash.clear_for_window(win)
       end
     end,
   })
@@ -508,15 +560,16 @@ function M.set(slot, opts)
     return
   end
 
+  local pattern_text = build_pattern(raw, opts)
+
   if slot ~= nil then
     if not valid_slot(slot) then
       return
     end
     apply_slot(raw, slot, opts)
+    flash_feedback(pattern_text)
     return
   end
-
-  local pattern_text = build_pattern(raw, opts)
 
   if config.auto_allocation.toggle_same then
     local existing = state.find_slot_by_raw_and_pattern(raw, pattern_text)
@@ -540,6 +593,7 @@ function M.set(slot, opts)
   end
 
   apply_slot(raw, auto_slot, opts)
+  flash_feedback(pattern_text)
 end
 
 ---@param slot integer
@@ -549,8 +603,13 @@ function M.clear(slot)
     return
   end
 
+  local entry = state.get_slots()[slot]
   state.clear_slot(slot)
   matcher.clear_slot_globally(slot)
+
+  if entry and type(entry.pattern) == "string" then
+    flash_feedback(entry.pattern)
+  end
 end
 
 ---@param opts? PinwordsSetOpts
@@ -650,6 +709,7 @@ end
 function M.teardown()
   stop_cword_timer()
   pcall(vim.api.nvim_del_augroup_by_name, AUGROUP_NAME)
+  flash.clear_all()
 
   matcher.clear_all_globally()
   for _, win in ipairs(vim.api.nvim_list_wins()) do
