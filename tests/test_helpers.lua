@@ -90,7 +90,14 @@ end
 
 ---@return integer
 function M.match_count()
-  return #vim.fn.getmatches()
+  local count = 0
+  for _, match in ipairs(vim.fn.getmatches()) do
+    local group = match.group
+    if type(group) ~= "string" or not group:match("^PinWordFlash") then
+      count = count + 1
+    end
+  end
+  return count
 end
 
 ---@param name string

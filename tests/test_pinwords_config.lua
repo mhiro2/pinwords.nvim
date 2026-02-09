@@ -237,6 +237,30 @@ T["setup warns on non-table colors"] = function()
   MiniTest.expect.equality(has_warning, true)
 end
 
+T["setup validates flash config values"] = function()
+  local pinwords = require("pinwords")
+
+  helpers.with_notify_override(function(notified)
+    local ok = pcall(pinwords.setup, {
+      flash = {
+        enabled = "yes",
+        timeout_ms = 0,
+        hl_group = 1,
+        priority = 1.5,
+      },
+    })
+    MiniTest.expect.equality(ok, true)
+
+    local has_warning = false
+    for _, n in ipairs(notified) do
+      if n.msg:match("flash%.") then
+        has_warning = true
+      end
+    end
+    MiniTest.expect.equality(has_warning, true)
+  end)
+end
+
 T["setup with non-table opts does not crash"] = function()
   local pinwords = require("pinwords")
 
