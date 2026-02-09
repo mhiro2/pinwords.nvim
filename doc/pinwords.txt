@@ -19,6 +19,12 @@ SETUP                                                           *pinwords-setup*
       on_full = "replace_oldest", -- "replace_oldest" | "replace_last" | "no_op"
       toggle_same = true,
     },
+    flash = {
+      enabled = true,
+      timeout_ms = 120,
+      hl_group = "PinWordFlash",
+      priority = 250,
+    },
     -- Custom highlight colors (see |pinwords-colors|)
     colors = nil,
     -- Optional picker integrations (see |pinwords-pickers|)
@@ -55,6 +61,23 @@ AUTO ALLOCATION                                          *pinwords-auto-allocati
   Notes ~
     - 'on_full' is used only with strategy=first_empty/cycle.
     - With strategy=lru, a slot is always selected; 'on_full' is ignored.
+
+FLASH FEEDBACK                                          *pinwords-flash-feedback*
+
+  A short visual flash is shown on successful pin/unpin operations.
+
+  enabled:
+    true   Enable visual feedback.
+    false  Disable visual feedback.
+
+  timeout_ms:
+    Flash duration in milliseconds.
+
+  hl_group:
+    Highlight group used for flash (default: PinWordFlash).
+
+  priority:
+    Match priority for flash highlighting.
 
 COMMANDS                                                       *pinwords-commands*
 
@@ -133,6 +156,7 @@ HIGHLIGHTS                                                     *pinwords-highlig
 
   PinWord1 .. PinWord9
   PinWordCword
+  PinWordFlash
 
 PICKER INTEGRATIONS                                        *pinwords-pickers*
 

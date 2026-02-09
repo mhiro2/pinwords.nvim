@@ -229,6 +229,11 @@ function M.apply(slots, colors)
     local opts = build_hl_opts(spec, default_cword_cterm)
     vim.api.nvim_set_hl(0, cword_group, opts)
   end
+
+  local flash_group = "PinWordFlash"
+  if highlight_is_empty(flash_group) then
+    vim.api.nvim_set_hl(0, flash_group, { link = "IncSearch" })
+  end
 end
 
 return M

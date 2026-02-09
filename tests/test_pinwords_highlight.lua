@@ -164,6 +164,19 @@ T["highlight applies cword with table spec"] = function()
   helpers.clear_hl("PinWordCword")
 end
 
+T["highlight defines PinWordFlash by default"] = function()
+  local highlight = require("pinwords.highlight")
+
+  helpers.clear_hl("PinWordFlash")
+  highlight.apply(1)
+
+  local hl = vim.api.nvim_get_hl(0, { name = "PinWordFlash", link = false })
+  MiniTest.expect.equality(type(hl), "table")
+  MiniTest.expect.equality(next(hl) ~= nil, true)
+
+  helpers.clear_hl("PinWordFlash")
+end
+
 T["highlight uses default for unspecified slots"] = function()
   local highlight = require("pinwords.highlight")
 
