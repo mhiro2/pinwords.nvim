@@ -103,13 +103,25 @@ local function get_visual_selection()
     return table.concat(lines, "\n")
   end
 
-  if #lines == 1 then
-    return lines[1]:sub(start_col, end_col)
+  ---@param line string
+  ---@param col integer
+  ---@return integer
+  local function char_end_byte_col(line, col)
+    local line_len = #line
+    if line_len == 0 then
+      return 0
+    end
+
+    local col0 = math.min(math.max(col - 1, 0), line_len - 1)
+    local char_idx = vim.str_utfindex(line, col0)
+    return math.min(vim.str_byteindex(line, char_idx + 1), line_len)
   end
 
-  lines[1] = lines[1]:sub(start_col)
-  lines[#lines] = lines[#lines]:sub(1, end_col)
-  return table.concat(lines, "\n")
+  local first_line_len = #lines[1]
+  local start_byte_col = math.min(math.max(start_col - 1, 0), first_line_len)
+  local end_byte_col = char_end_byte_col(lines[#lines], end_col)
+  local selected = vim.api.nvim_buf_get_text(buf, start_row - 1, start_byte_col, end_row - 1, end_byte_col, {})
+  return table.concat(selected, "\n")
 end
 
 ---@param max_slots integer

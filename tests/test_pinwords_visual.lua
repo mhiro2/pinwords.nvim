@@ -40,4 +40,24 @@ T["visual pin supports multi-line selection"] = function()
   MiniTest.expect.equality(slots[1].raw, "foo bar\nbaz")
 end
 
+T["visual pin handles multibyte selection on one line"] = function()
+  helpers.setup_buffer({ "あいうえお" })
+  helpers.set_visual_marks(1, 1, 1, 7)
+
+  vim.cmd("'<,'>PinWord")
+
+  local slots = require("pinwords").list()
+  MiniTest.expect.equality(slots[1].raw, "あいう")
+end
+
+T["visual pin handles multibyte selection across lines"] = function()
+  helpers.setup_buffer({ "あいう", "かきく" })
+  helpers.set_visual_marks(1, 4, 2, 4)
+
+  vim.cmd("'<,'>PinWord")
+
+  local slots = require("pinwords").list()
+  MiniTest.expect.equality(slots[1].raw, "いう\nかき")
+end
+
 return T
