@@ -513,7 +513,7 @@ T["init_global_state fixes invalid slots table internally"] = function()
   MiniTest.expect.equality(next(slots), nil)
 end
 
-T["find_slot_by_raw_and_pattern matches both raw and pattern"] = function()
+T["find_slot_by_raw_or_pattern_pair matches both raw and pattern"] = function()
   helpers.setup_buffer({ "test" })
 
   local state = require("pinwords.state")
@@ -525,11 +525,11 @@ T["find_slot_by_raw_and_pattern matches both raw and pattern"] = function()
     hl_group = "PinWord1",
   })
 
-  local slot = state.find_slot_by_raw_and_pattern("foo", "\\V\\c\\<foo\\>")
+  local slot = state.find_slot_by_raw_or_pattern_pair("foo", "\\V\\c\\<foo\\>")
   MiniTest.expect.equality(slot, 1)
 end
 
-T["find_slot_by_raw_and_pattern matches by raw alone"] = function()
+T["find_slot_by_raw_or_pattern_pair matches by raw alone"] = function()
   helpers.setup_buffer({ "test" })
 
   local state = require("pinwords.state")
@@ -542,11 +542,11 @@ T["find_slot_by_raw_and_pattern matches by raw alone"] = function()
   })
 
   -- Same raw but different pattern (case-insensitive vs case-sensitive)
-  local slot = state.find_slot_by_raw_and_pattern("foo", "\\V\\c\\<foo\\>")
+  local slot = state.find_slot_by_raw_or_pattern_pair("foo", "\\V\\c\\<foo\\>")
   MiniTest.expect.equality(slot, 1)
 end
 
-T["find_slot_by_raw_and_pattern matches by pattern alone"] = function()
+T["find_slot_by_raw_or_pattern_pair matches by pattern alone"] = function()
   helpers.setup_buffer({ "test" })
 
   local state = require("pinwords.state")
@@ -559,11 +559,11 @@ T["find_slot_by_raw_and_pattern matches by pattern alone"] = function()
   })
 
   -- Different raw but same pattern
-  local slot = state.find_slot_by_raw_and_pattern("bar", "\\V\\c\\<foo\\>")
+  local slot = state.find_slot_by_raw_or_pattern_pair("bar", "\\V\\c\\<foo\\>")
   MiniTest.expect.equality(slot, 1)
 end
 
-T["find_slot_by_raw_and_pattern does not cross-match entries"] = function()
+T["find_slot_by_raw_or_pattern_pair does not cross-match entries"] = function()
   helpers.setup_buffer({ "test" })
 
   local state = require("pinwords.state")
@@ -581,7 +581,7 @@ T["find_slot_by_raw_and_pattern does not cross-match entries"] = function()
   })
 
   -- Neither raw nor pattern matches any single entry
-  local slot = state.find_slot_by_raw_and_pattern("baz", "\\V\\c\\<qux\\>")
+  local slot = state.find_slot_by_raw_or_pattern_pair("baz", "\\V\\c\\<qux\\>")
   MiniTest.expect.equality(slot, nil)
 end
 

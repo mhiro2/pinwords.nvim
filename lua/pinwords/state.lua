@@ -312,7 +312,7 @@ end
 ---@param raw string
 ---@param pattern_text string
 ---@return integer|nil
-function M.find_slot_by_raw_and_pattern(raw, pattern_text)
+function M.find_slot_by_raw_or_pattern_pair(raw, pattern_text)
   for slot, entry in pairs(global_state.slots) do
     if entry.raw == raw or entry.pattern == pattern_text then
       return slot
