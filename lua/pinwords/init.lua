@@ -1,10 +1,17 @@
-local commands = require("pinwords.commands")
-local flash = require("pinwords.flash")
-local highlight = require("pinwords.highlight")
-local jump = require("pinwords.jump")
-local matcher = require("pinwords.matcher")
-local pattern = require("pinwords.pattern")
-local state = require("pinwords.state")
+---@type table|nil
+local commands
+---@type table|nil
+local flash
+---@type table|nil
+local highlight
+---@type table|nil
+local jump
+---@type table|nil
+local matcher
+---@type table|nil
+local pattern
+---@type table|nil
+local state
 
 local M = {}
 local AUGROUP_NAME = "PinWords"
@@ -17,6 +24,21 @@ local COMMAND_NAMES = {
   "PinWordNext",
   "PinWordPrev",
 }
+
+---@return nil
+local function ensure_modules()
+  if commands then
+    return
+  end
+
+  commands = require("pinwords.commands")
+  flash = require("pinwords.flash")
+  highlight = require("pinwords.highlight")
+  jump = require("pinwords.jump")
+  matcher = require("pinwords.matcher")
+  pattern = require("pinwords.pattern")
+  state = require("pinwords.state")
+end
 
 ---@param msg string
 local function warn(msg)
@@ -286,9 +308,21 @@ end
 -- Windows where cword highlight is enabled (winid -> true)
 ---@type table<integer, boolean>
 local cword_enabled_wins = {}
+---@type table<integer, boolean>
+local pending_reapply_wins = {}
 
 local cword_timer = nil
 local CWORD_DEBOUNCE_MS = 50
+
+---@param args table|nil
+---@return integer
+local function resolve_autocmd_win(args)
+  local win = type(args) == "table" and args.win or nil
+  if type(win) ~= "number" or win == 0 then
+    win = vim.api.nvim_get_current_win()
+  end
+  return win
+end
 
 ---@return nil
 local function stop_cword_timer()
@@ -436,6 +470,7 @@ end
 ---@param opts? PinwordsConfig
 ---@return nil
 function M.setup(opts)
+  ensure_modules()
   config = sanitize_config(opts)
 
   -- Initialize global state
@@ -462,10 +497,14 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd({ "BufWinEnter", "WinEnter" }, {
     group = group,
     callback = function(args)
-      local win = args.win
-      if type(win) ~= "number" or win == 0 then
-        win = vim.api.nvim_get_current_win()
+      local win = resolve_autocmd_win(args)
+      if pending_reapply_wins[win] then
+        return
       end
+      pending_reapply_wins[win] = true
+      vim.schedule(function()
+        pending_reapply_wins[win] = nil
+      end)
 
       matcher.reapply_all_for_window(win)
       if is_cword_enabled(win) then
@@ -555,6 +594,7 @@ end
 ---@param opts? PinwordsSetOpts
 ---@return nil
 function M.set(slot, opts)
+  ensure_modules()
   local raw = resolve_raw(opts)
   if not raw then
     return
@@ -599,6 +639,7 @@ end
 ---@param slot integer
 ---@return nil
 function M.clear(slot)
+  ensure_modules()
   if not valid_slot(slot) then
     return
   end
@@ -620,6 +661,7 @@ end
 
 ---@return nil
 function M.cword_toggle()
+  ensure_modules()
   local win = vim.api.nvim_get_current_win()
 
   if not vim.api.nvim_win_is_valid(win) then
@@ -653,6 +695,7 @@ end
 
 ---@return nil
 function M.unpin()
+  ensure_modules()
   local raw = resolve_raw(nil, "pinwords: no word to unpin")
   if not raw then
     return
@@ -667,18 +710,21 @@ end
 
 ---@return nil
 function M.clear_all()
+  ensure_modules()
   state.clear_all()
   matcher.clear_all_globally()
 end
 
 ---@return table<integer, PinwordsSlot>
 function M.list()
+  ensure_modules()
   return state.get_slots()
 end
 
 ---@param slot? integer
 ---@return boolean success
 function M.jump_next(slot)
+  ensure_modules()
   if slot ~= nil and not valid_slot(slot) then
     return false
   end
@@ -688,6 +734,7 @@ end
 ---@param slot? integer
 ---@return boolean success
 function M.jump_prev(slot)
+  ensure_modules()
   if slot ~= nil and not valid_slot(slot) then
     return false
   end
@@ -696,6 +743,7 @@ end
 
 --- Flush debounced cword update immediately (for testing)
 function M.flush_cword_timer()
+  ensure_modules()
   if cword_timer then
     cword_timer:stop()
   end
@@ -707,6 +755,7 @@ end
 
 ---@return nil
 function M.teardown()
+  ensure_modules()
   stop_cword_timer()
   pcall(vim.api.nvim_del_augroup_by_name, AUGROUP_NAME)
   flash.clear_all()
@@ -727,6 +776,7 @@ function M.teardown()
   end
 
   cword_enabled_wins = {}
+  pending_reapply_wins = {}
   state.teardown()
 end
 
