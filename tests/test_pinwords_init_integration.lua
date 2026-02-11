@@ -249,6 +249,30 @@ T["setup creates autocmd group"] = function()
   MiniTest.expect.equality(has_pinwords_autocmds(), true)
 end
 
+T["setup deduplicates reapply across BufWinEnter and WinEnter"] = function()
+  helpers.setup_buffer({ "foo bar" })
+
+  local pinwords = require("pinwords")
+  pinwords.setup()
+
+  local matcher = require("pinwords.matcher")
+  local original_reapply = matcher.reapply_all_for_window
+  local reapply_calls = 0
+
+  matcher.reapply_all_for_window = function(win)
+    reapply_calls = reapply_calls + 1
+    return original_reapply(win)
+  end
+
+  local ok, err = pcall(vim.cmd, "new")
+  matcher.reapply_all_for_window = original_reapply
+
+  if not ok then
+    error(err)
+  end
+  MiniTest.expect.equality(reapply_calls, 1)
+end
+
 T["setup registers commands"] = function()
   helpers.setup_buffer({ "foo bar" })
 

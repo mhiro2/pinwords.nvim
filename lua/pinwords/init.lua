@@ -308,6 +308,8 @@ end
 -- Windows where cword highlight is enabled (winid -> true)
 ---@type table<integer, boolean>
 local cword_enabled_wins = {}
+---@type table<integer, boolean>
+local pending_reapply_wins = {}
 
 local cword_timer = nil
 local CWORD_DEBOUNCE_MS = 50
@@ -489,6 +491,13 @@ function M.setup(opts)
       if type(win) ~= "number" or win == 0 then
         win = vim.api.nvim_get_current_win()
       end
+      if pending_reapply_wins[win] then
+        return
+      end
+      pending_reapply_wins[win] = true
+      vim.schedule(function()
+        pending_reapply_wins[win] = nil
+      end)
 
       matcher.reapply_all_for_window(win)
       if is_cword_enabled(win) then
@@ -760,6 +769,7 @@ function M.teardown()
   end
 
   cword_enabled_wins = {}
+  pending_reapply_wins = {}
   state.teardown()
 end
 
