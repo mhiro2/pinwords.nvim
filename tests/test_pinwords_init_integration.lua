@@ -34,6 +34,45 @@ T["setup can be called multiple times"] = function()
   MiniTest.expect.equality(match ~= nil, true)
 end
 
+T["setup lazy-loads internal modules"] = function()
+  helpers.setup_buffer({ "foo bar" })
+
+  local first = require("pinwords")
+  first.teardown()
+
+  local modules = {
+    "pinwords",
+    "pinwords.commands",
+    "pinwords.flash",
+    "pinwords.highlight",
+    "pinwords.jump",
+    "pinwords.matcher",
+    "pinwords.pattern",
+    "pinwords.state",
+  }
+  for _, module_name in ipairs(modules) do
+    package.loaded[module_name] = nil
+  end
+
+  local pinwords = require("pinwords")
+  MiniTest.expect.equality(package.loaded["pinwords.commands"], nil)
+  MiniTest.expect.equality(package.loaded["pinwords.flash"], nil)
+  MiniTest.expect.equality(package.loaded["pinwords.highlight"], nil)
+  MiniTest.expect.equality(package.loaded["pinwords.jump"], nil)
+  MiniTest.expect.equality(package.loaded["pinwords.matcher"], nil)
+  MiniTest.expect.equality(package.loaded["pinwords.pattern"], nil)
+  MiniTest.expect.equality(package.loaded["pinwords.state"], nil)
+
+  pinwords.setup({ slots = 3 })
+  MiniTest.expect.equality(type(package.loaded["pinwords.commands"]), "table")
+  MiniTest.expect.equality(type(package.loaded["pinwords.flash"]), "table")
+  MiniTest.expect.equality(type(package.loaded["pinwords.highlight"]), "table")
+  MiniTest.expect.equality(type(package.loaded["pinwords.jump"]), "table")
+  MiniTest.expect.equality(type(package.loaded["pinwords.matcher"]), "table")
+  MiniTest.expect.equality(type(package.loaded["pinwords.pattern"]), "table")
+  MiniTest.expect.equality(type(package.loaded["pinwords.state"]), "table")
+end
+
 T["setup with reduced slots prunes existing pins"] = function()
   helpers.setup_buffer({ "foo bar baz" })
 
