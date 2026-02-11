@@ -513,22 +513,6 @@ T["init_global_state fixes invalid slots table internally"] = function()
   MiniTest.expect.equality(next(slots), nil)
 end
 
-T["find_slot_by_pattern is deprecated but still works"] = function()
-  helpers.setup_buffer({ "test" })
-
-  local state = require("pinwords.state")
-  state.clear_all()
-
-  state.set_slot(1, {
-    raw = "foo",
-    pattern = "\\V\\c\\<foo\\>",
-    hl_group = "PinWord1",
-  })
-
-  local slot = state.find_slot_by_pattern("\\V\\c\\<foo\\>")
-  MiniTest.expect.equality(slot, 1)
-end
-
 T["find_slot_by_raw_and_pattern matches both raw and pattern"] = function()
   helpers.setup_buffer({ "test" })
 
