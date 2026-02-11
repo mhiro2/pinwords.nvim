@@ -273,6 +273,48 @@ T["setup deduplicates reapply across BufWinEnter and WinEnter"] = function()
   MiniTest.expect.equality(reapply_calls, 1)
 end
 
+T["setup window-enter callback handles missing win field"] = function()
+  helpers.setup_buffer({ "foo bar" })
+
+  local pinwords = require("pinwords")
+  local original_create_autocmd = vim.api.nvim_create_autocmd
+  local window_enter_callback
+
+  vim.api.nvim_create_autocmd = function(event, opts)
+    local events = type(event) == "table" and event or { event }
+    for _, name in ipairs(events) do
+      if name == "WinEnter" then
+        window_enter_callback = opts.callback
+        break
+      end
+    end
+    return original_create_autocmd(event, opts)
+  end
+
+  local ok_setup, setup_err = pcall(pinwords.setup, {})
+  vim.api.nvim_create_autocmd = original_create_autocmd
+  if not ok_setup then
+    error(setup_err)
+  end
+
+  MiniTest.expect.equality(type(window_enter_callback), "function")
+
+  local ok_callback, callback_err = pcall(window_enter_callback, {
+    event = "WinEnter",
+    buf = vim.api.nvim_get_current_buf(),
+    match = "",
+  })
+  if not ok_callback then
+    error(callback_err)
+  end
+
+  local ok_no_win, no_win_err =
+    pcall(window_enter_callback, { event = "WinEnter", buf = vim.api.nvim_get_current_buf() })
+  if not ok_no_win then
+    error(no_win_err)
+  end
+end
+
 T["setup registers commands"] = function()
   helpers.setup_buffer({ "foo bar" })
 

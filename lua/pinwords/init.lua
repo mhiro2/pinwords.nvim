@@ -314,6 +314,16 @@ local pending_reapply_wins = {}
 local cword_timer = nil
 local CWORD_DEBOUNCE_MS = 50
 
+---@param args table|nil
+---@return integer
+local function resolve_autocmd_win(args)
+  local win = type(args) == "table" and args.win or nil
+  if type(win) ~= "number" or win == 0 then
+    win = vim.api.nvim_get_current_win()
+  end
+  return win
+end
+
 ---@return nil
 local function stop_cword_timer()
   if not cword_timer then
@@ -487,10 +497,7 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd({ "BufWinEnter", "WinEnter" }, {
     group = group,
     callback = function(args)
-      local win = args.win
-      if type(win) ~= "number" or win == 0 then
-        win = vim.api.nvim_get_current_win()
-      end
+      local win = resolve_autocmd_win(args)
       if pending_reapply_wins[win] then
         return
       end
