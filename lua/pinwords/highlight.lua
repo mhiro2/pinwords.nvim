@@ -1,21 +1,5 @@
 local M = {}
 
----@class PinwordsColorSpec
----@field bg? string         -- background color (hex)
----@field fg? string         -- foreground color (hex)
----@field bold? boolean
----@field italic? boolean
----@field underline? boolean
----@field strikethrough? boolean
----@field ctermbg? integer
----@field ctermfg? integer
-
----@alias PinwordsColor string | PinwordsColorSpec
-
----@class PinwordsColorsConfig
----@field [integer] PinwordsColor  -- slot number => color
----@field cword? PinwordsColor     -- cursor word color
-
 ---@type string[]
 local default_palette = {
   "#ff6b6b",
