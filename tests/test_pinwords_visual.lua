@@ -40,4 +40,48 @@ T["visual pin supports multi-line selection"] = function()
   MiniTest.expect.equality(slots[1].raw, "foo bar\nbaz")
 end
 
+T["visual pin handles multibyte selection on one line"] = function()
+  helpers.setup_buffer({ "あいうえお" })
+  helpers.set_visual_marks(1, 1, 1, 7)
+
+  vim.cmd("'<,'>PinWord")
+
+  local slots = require("pinwords").list()
+  MiniTest.expect.equality(slots[1].raw, "あいう")
+end
+
+T["visual pin handles multibyte selection across lines"] = function()
+  helpers.setup_buffer({ "あいう", "かきく" })
+  helpers.set_visual_marks(1, 4, 2, 4)
+
+  vim.cmd("'<,'>PinWord")
+
+  local slots = require("pinwords").list()
+  MiniTest.expect.equality(slots[1].raw, "いう\nかき")
+end
+
+T["visual pin handles emoji selection on one line"] = function()
+  local emoji1 = vim.fn.nr2char(0x1F600)
+  local emoji2 = vim.fn.nr2char(0x1F603)
+  helpers.setup_buffer({ emoji1 .. emoji2 .. "x" })
+  helpers.set_visual_marks(1, 1, 1, 5)
+
+  vim.cmd("'<,'>PinWord")
+
+  local slots = require("pinwords").list()
+  MiniTest.expect.equality(slots[1].raw, emoji1 .. emoji2)
+end
+
+T["visual pin handles combining character selection"] = function()
+  local combining_acute = vim.fn.nr2char(0x0301)
+  local text = "e" .. combining_acute .. "f"
+  helpers.setup_buffer({ text })
+  helpers.set_visual_marks(1, 1, 1, 2)
+
+  vim.cmd("'<,'>PinWord")
+
+  local slots = require("pinwords").list()
+  MiniTest.expect.equality(slots[1].raw, "e" .. combining_acute)
+end
+
 return T
