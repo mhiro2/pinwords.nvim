@@ -1,0 +1,58 @@
+name: Benchmark
+
+on:
+  pull_request:
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  pull-requests: write
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up Neovim
+        uses: rhysd/action-setup-vim@19e3dd31a84dbc2c5445d65e9b363f616cab96c1 # v1.6.0
+        with:
+          neovim: true
+          version: stable
+      - name: Run benchmarks
+        run: make bench 2>&1 | tee bench_output.txt
+      - name: Post benchmark results to PR
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Delete previous benchmark comment if exists
+          gh pr view "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" \
+            --json comments --jq '.comments[].id' | while read -r id; do
+            body=$(gh api "repos/${{ github.repository }}/issues/comments/${id}" --jq '.body')
+            if echo "${body}" | grep -q '<!-- pinwords-bench -->'; then
+              gh api --method DELETE "repos/${{ github.repository }}/issues/comments/${id}"
+            fi
+          done
+
+          # Post new comment
+          cat <<EOF > bench_comment.md
+          <!-- pinwords-bench -->
+          ## Benchmark Results
+
+          \`\`\`
+          $(cat bench_output.txt)
+          \`\`\`
+          EOF
+
+          gh pr comment "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" \
+            --body-file bench_comment.md
