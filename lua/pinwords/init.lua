@@ -70,6 +70,7 @@ end
 ---@field flash PinwordsFlashConfig
 ---@field telescope PinwordsTelescopeConfig
 ---@field snacks PinwordsSnacksConfig
+---@field fzf_lua PinwordsFzfLuaConfig
 
 ---@class PinwordsAutoAllocation
 ---@field strategy PinwordsAutoAllocationStrategy
@@ -80,6 +81,9 @@ end
 ---@field enabled boolean
 
 ---@class PinwordsSnacksConfig
+---@field enabled boolean
+
+---@class PinwordsFzfLuaConfig
 ---@field enabled boolean
 
 ---@class PinwordsFlashConfig
@@ -124,6 +128,9 @@ local default_config = {
     enabled = false,
   },
   snacks = {
+    enabled = false,
+  },
+  fzf_lua = {
     enabled = false,
   },
 }
@@ -269,6 +276,15 @@ local function sanitize_config(opts)
     cfg.snacks.enabled = validate_field(cfg.snacks.enabled, function(v)
       return type(v) == "boolean"
     end, default_config.snacks.enabled, "snacks.enabled must be boolean; fallback to default")
+  end
+
+  if type(cfg.fzf_lua) ~= "table" then
+    warn("fzf_lua must be a table; fallback to default")
+    cfg.fzf_lua = vim.deepcopy(default_config.fzf_lua)
+  else
+    cfg.fzf_lua.enabled = validate_field(cfg.fzf_lua.enabled, function(v)
+      return type(v) == "boolean"
+    end, default_config.fzf_lua.enabled, "fzf_lua.enabled must be boolean; fallback to default")
   end
 
   if type(cfg.flash) ~= "table" then
@@ -579,6 +595,13 @@ function M.setup(opts)
     end
   end
 
+  -- Load fzf-lua integration if enabled and available
+  if config.fzf_lua.enabled then
+    local ok, fzf_integration = pcall(require, "pinwords.fzf_lua")
+    if not ok or type(fzf_integration) ~= "table" then
+      warn("fzf_lua.enabled is true but fzf-lua is not available")
+    end
+  end
 end
 
 ---@param raw string
@@ -723,7 +746,7 @@ function M.list()
 end
 
 ---Open interactive picker for pinned words.
----Tries enabled pickers in order: snacks -> telescope -> vim.ui.select
+---Tries enabled pickers in order: snacks -> telescope -> fzf_lua -> vim.ui.select
 ---@return nil
 function M.pick()
   ensure_modules()
@@ -749,6 +772,15 @@ function M.pick()
         ext()
         return
       end
+    end
+  end
+
+  -- Try fzf-lua
+  if config.fzf_lua.enabled then
+    local ok, fzf_mod = pcall(require, "pinwords.fzf_lua")
+    if ok and type(fzf_mod) == "table" and type(fzf_mod.picker) == "function" then
+      fzf_mod.picker()
+      return
     end
   end
 
