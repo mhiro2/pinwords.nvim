@@ -166,6 +166,10 @@ require("pinwords").setup({
   snacks = {
     enabled = true,
   },
+  -- fzf-lua integration
+  fzf_lua = {
+    enabled = true,
+  },
 })
 ```
 
@@ -182,7 +186,7 @@ See the [Picker Integrations](#-picker-integrations) section for usage details.
 | `:UnpinWord`            | Unpin word under cursor |
 | `:UnpinWord {slot}`     | Clear slot            |
 | `:UnpinAllWords`        | Clear all             |
-| `:PinWordList`          | List active pins      |
+| `:PinWordList`          | Interactive picker for pinned words (falls back to `vim.ui.select`) |
 | `:PinWordCwordToggle`   | Toggle cursor-word highlight (current window, follows cursor incl. insert) |
 | `:PinWordNext [slot]`   | Jump to next pinned word occurrence |
 | `:PinWordPrev [slot]`   | Jump to previous pinned word occurrence |
@@ -198,6 +202,7 @@ require("pinwords").unpin()        -- unpin word under cursor
 require("pinwords").clear(slot)
 require("pinwords").clear_all()
 require("pinwords").list()
+require("pinwords").pick()         -- open interactive picker
 require("pinwords").jump_next()    -- jump to next pinned word
 require("pinwords").jump_next(slot) -- jump to next occurrence of specific slot
 require("pinwords").jump_prev()    -- jump to previous pinned word
@@ -209,7 +214,7 @@ require("pinwords").jump_prev(slot)
 pinwords.nvim provides optional integrations with popular picker plugins for browsing and managing pinned words through a fuzzy finder interface.
 
 > [!NOTE]
-> Both integrations are **completely optional**. pinwords.nvim works perfectly without them - they only provide alternative interfaces if you have the picker plugins installed.
+> All picker integrations are **completely optional**. pinwords.nvim works perfectly without them — when no picker is enabled, `:PinWordList` uses `vim.ui.select` as a built-in fallback.
 
 ### Common Features
 
@@ -277,6 +282,26 @@ end, { desc = "Snacks: Pinned words" })
 > [!NOTE]
 > To keep multi-select stable in Snacks, pinwords assigns a unique `id` to each entry.
 
+### 🔎 fzf-lua
+
+[fzf-lua](https://github.com/ibhagwan/fzf-lua) integration for pinwords.
+
+**Setup** (optional auto-loading):
+```lua
+require("pinwords").setup({
+  fzf_lua = {
+    enabled = true,
+  },
+})
+```
+
+**Usage:**
+```lua
+vim.keymap.set("n", "<leader>fp", function()
+  require("pinwords.fzf_lua").picker()
+end, { desc = "fzf-lua: Pinned words" })
+```
+
 ## 🎨 Highlight Groups
 
 ```vim
@@ -293,6 +318,7 @@ Fully customizable via standard highlight overrides.
 * No external dependencies
 * Optional: [telescope.nvim](https://github.com/nvim-telescope/telescope.nvim) for telescope integration
 * Optional: [snacks.nvim](https://github.com/folke/snacks.nvim) for snacks picker integration
+* Optional: [fzf-lua](https://github.com/ibhagwan/fzf-lua) for fzf-lua picker integration
 
 ## 📄 License
 
