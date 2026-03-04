@@ -16,10 +16,28 @@ local conf = require("telescope.config").values
 local entry_display = require("telescope.pickers.entry_display")
 local pinwords = require("pinwords")
 
----@alias PinwordsEntry {slot: integer, raw: string, pattern: string, hl_group: string}
+---@class PinwordsTelescopeItem
+---@field slot integer
+---@field raw string
+---@field pattern string
+---@field hl_group string
 
----@param _opts table
----@return function
+---@class PinwordsTelescopeEntry
+---@field value PinwordsTelescopeItem
+---@field display fun(): string
+---@field ordinal string
+
+---@class PinwordsTelescopePicker
+---@field get_multi_selection fun(self: PinwordsTelescopePicker): PinwordsTelescopeEntry[]
+
+---@class PinwordsTelescopeOpts
+---@field prompt_title? string
+---@field previewer? any
+---@field sorter? function
+---@field attach_mappings? fun(prompt_bufnr: integer, map: function): boolean
+
+---@param _opts PinwordsTelescopeOpts
+---@return fun(entry: PinwordsTelescopeItem): PinwordsTelescopeEntry
 local function make_entry(_opts)
   local displayer = entry_display.create({
     separator = " ",
@@ -46,8 +64,9 @@ local function make_entry(_opts)
 end
 
 ---@param prompt_bufnr integer
----@param map function
+---@param map fun(mode: string, lhs: string, rhs: function)
 local function attach_mappings(prompt_bufnr, map)
+  ---@param entries PinwordsTelescopeEntry[]
   local function unpin_entries(entries)
     for _, entry in ipairs(entries) do
       if entry.value then
@@ -57,6 +76,7 @@ local function attach_mappings(prompt_bufnr, map)
   end
 
   actions.select_default:replace(function()
+    ---@type PinwordsTelescopePicker
     local picker = action_state.get_current_picker(prompt_bufnr)
     local multi_selection = picker:get_multi_selection()
     local selection = action_state.get_selected_entry()
@@ -89,12 +109,13 @@ local function attach_mappings(prompt_bufnr, map)
   return true
 end
 
----@param opts table
+---@param opts? PinwordsTelescopeOpts
 local function pinwords_picker(opts)
   opts = opts or {}
 
   local slots = pinwords.list()
 
+  ---@type PinwordsTelescopeItem[]
   local results = {}
   for slot, entry in pairs(slots) do
     table.insert(results, {

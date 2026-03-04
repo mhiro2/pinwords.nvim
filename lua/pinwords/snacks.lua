@@ -10,9 +10,35 @@ end
 
 local pinwords = require("pinwords")
 
+---@class PinwordsSnacksItem
+---@field idx integer
+---@field id string
+---@field score integer
+---@field slot integer
+---@field raw string
+---@field pattern string
+---@field hl_group string
+
+---@alias PinwordsSnacksDisplayChunk [string, string]
+---@alias PinwordsSnacksDisplay PinwordsSnacksDisplayChunk[]
+
+---@class PinwordsSnacksPicker
+---@field current fun(self: PinwordsSnacksPicker): PinwordsSnacksItem|nil
+---@field selected fun(self: PinwordsSnacksPicker): PinwordsSnacksItem[]
+---@field close fun(self: PinwordsSnacksPicker)
+
+---@class PinwordsSnacksPickerOpts
+---@field source string
+---@field title string
+---@field items PinwordsSnacksItem[]
+---@field format fun(item: PinwordsSnacksItem): PinwordsSnacksDisplay
+---@field confirm fun(picker: PinwordsSnacksPicker, item: PinwordsSnacksItem|nil)
+---@field actions table<string, fun(picker: PinwordsSnacksPicker)>
+---@field win table
+
 ---Format entry for display in picker
----@param item table
----@return table
+---@param item PinwordsSnacksItem
+---@return PinwordsSnacksDisplay
 local function format_entry(item)
   return {
     { item.slot .. ":", "SnacksPickerSpecial" },
@@ -21,7 +47,7 @@ local function format_entry(item)
 end
 
 ---Action: Unpin single entry (for <C-d>)
----@param picker table
+---@param picker PinwordsSnacksPicker
 local function action_unpin_single(picker)
   local item = picker:current()
   if item then
@@ -32,7 +58,7 @@ local function action_unpin_single(picker)
 end
 
 ---Action: Clear all pinned words (for <C-x>)
----@param picker table
+---@param picker PinwordsSnacksPicker
 local function action_clear_all(picker)
   picker:close()
   pinwords.clear_all()
@@ -40,7 +66,7 @@ local function action_clear_all(picker)
 end
 
 ---Open snacks picker for pinned words
----@param opts? table
+---@param opts? table<string, any>
 local function pinwords_picker(opts)
   opts = opts or {}
 
@@ -48,6 +74,7 @@ local function pinwords_picker(opts)
   local slots = pinwords.list()
 
   -- Build items array
+  ---@type PinwordsSnacksItem[]
   local items = {}
   for slot, entry in pairs(slots) do
     table.insert(items, {
@@ -72,6 +99,7 @@ local function pinwords_picker(opts)
     return
   end
 
+  ---@type PinwordsSnacksPickerOpts
   local picker_opts = {
     source = "pinwords",
     title = "Pinned Words",
