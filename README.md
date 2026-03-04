@@ -191,6 +191,10 @@ See the [Picker Integrations](#-picker-integrations) section for usage details.
 | `:PinWordNext [slot]`   | Jump to next pinned word occurrence |
 | `:PinWordPrev [slot]`   | Jump to previous pinned word occurrence |
 
+### Health Check
+
+Run `:checkhealth pinwords` to validate current config values and optional picker dependencies.
+
 ### Lua API
 
 ```lua

@@ -8,6 +8,11 @@ Pin words to keep them visible while reading or reviewing code.
 REQUIREMENTS
   - Neovim >= 0.10
 
+HEALTH                                                          *pinwords-health*
+
+  Run `:checkhealth pinwords` to validate current config values and
+  optional picker dependencies.
+
 SETUP                                                           *pinwords-setup*
 >lua
   require("pinwords").setup({
