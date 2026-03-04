@@ -176,23 +176,8 @@ function M.setup(max_slots)
   end, { nargs = 0, force = true, desc = "Clear all pinned words." })
 
   vim.api.nvim_create_user_command("PinWordList", function()
-    local slots = require("pinwords").list()
-    local keys = vim.tbl_keys(slots)
-    table.sort(keys)
-
-    if #keys == 0 then
-      vim.notify("pinwords: no pinned words", vim.log.levels.INFO)
-      return
-    end
-
-    local lines = {}
-    for _, slot in ipairs(keys) do
-      local entry = slots[slot]
-      table.insert(lines, string.format("%d: %s", slot, entry.raw))
-    end
-
-    vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO, { title = "PinWords" })
-  end, { nargs = 0, force = true, desc = "List pinned words in current buffer." })
+    require("pinwords").pick()
+  end, { nargs = 0, force = true, desc = "List pinned words in interactive picker." })
 
   vim.api.nvim_create_user_command("PinWordCwordToggle", function()
     require("pinwords").cword_toggle()

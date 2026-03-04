@@ -70,6 +70,7 @@ end
 ---@field flash PinwordsFlashConfig
 ---@field telescope PinwordsTelescopeConfig
 ---@field snacks PinwordsSnacksConfig
+---@field fzf_lua PinwordsFzfLuaConfig
 
 ---@class PinwordsAutoAllocation
 ---@field strategy PinwordsAutoAllocationStrategy
@@ -80,6 +81,9 @@ end
 ---@field enabled boolean
 
 ---@class PinwordsSnacksConfig
+---@field enabled boolean
+
+---@class PinwordsFzfLuaConfig
 ---@field enabled boolean
 
 ---@class PinwordsFlashConfig
@@ -124,6 +128,9 @@ local default_config = {
     enabled = false,
   },
   snacks = {
+    enabled = false,
+  },
+  fzf_lua = {
     enabled = false,
   },
 }
@@ -269,6 +276,15 @@ local function sanitize_config(opts)
     cfg.snacks.enabled = validate_field(cfg.snacks.enabled, function(v)
       return type(v) == "boolean"
     end, default_config.snacks.enabled, "snacks.enabled must be boolean; fallback to default")
+  end
+
+  if type(cfg.fzf_lua) ~= "table" then
+    warn("fzf_lua must be a table; fallback to default")
+    cfg.fzf_lua = vim.deepcopy(default_config.fzf_lua)
+  else
+    cfg.fzf_lua.enabled = validate_field(cfg.fzf_lua.enabled, function(v)
+      return type(v) == "boolean"
+    end, default_config.fzf_lua.enabled, "fzf_lua.enabled must be boolean; fallback to default")
   end
 
   if type(cfg.flash) ~= "table" then
@@ -574,8 +590,16 @@ function M.setup(opts)
   -- Load Snacks integration if enabled and available
   if config.snacks.enabled then
     local ok, snacks_integration = pcall(require, "pinwords.snacks")
-    if not ok or not snacks_integration then
+    if not ok or type(snacks_integration) ~= "table" then
       warn("snacks.enabled is true but snacks.nvim is not available")
+    end
+  end
+
+  -- Load fzf-lua integration if enabled and available
+  if config.fzf_lua.enabled then
+    local ok, fzf_integration = pcall(require, "pinwords.fzf_lua")
+    if not ok or type(fzf_integration) ~= "table" then
+      warn("fzf_lua.enabled is true but fzf-lua is not available")
     end
   end
 end
@@ -719,6 +743,73 @@ end
 function M.list()
   ensure_modules()
   return state.get_slots()
+end
+
+---Open interactive picker for pinned words.
+---Tries enabled pickers in order: snacks -> telescope -> fzf_lua -> vim.ui.select
+---@return nil
+function M.pick()
+  ensure_modules()
+
+  -- Try snacks
+  if config.snacks.enabled then
+    local ok, snacks_mod = pcall(require, "pinwords.snacks")
+    if ok and type(snacks_mod) == "table" and type(snacks_mod.picker) == "function" then
+      snacks_mod.picker()
+      return
+    end
+  end
+
+  -- Try telescope
+  if config.telescope.enabled then
+    local ok, telescope = pcall(require, "telescope")
+    if ok and telescope then
+      pcall(telescope.load_extension, "pinwords")
+      local ext_ok, ext = pcall(function()
+        return telescope.extensions.pinwords.pinwords
+      end)
+      if ext_ok and ext then
+        ext()
+        return
+      end
+    end
+  end
+
+  -- Try fzf-lua
+  if config.fzf_lua.enabled then
+    local ok, fzf_mod = pcall(require, "pinwords.fzf_lua")
+    if ok and type(fzf_mod) == "table" and type(fzf_mod.picker) == "function" then
+      fzf_mod.picker()
+      return
+    end
+  end
+
+  -- Fallback: vim.ui.select
+  local slots = state.get_slots()
+  local keys = vim.tbl_keys(slots)
+  table.sort(keys)
+
+  if #keys == 0 then
+    vim.notify("pinwords: no pinned words", vim.log.levels.INFO)
+    return
+  end
+
+  local items = {}
+  for _, slot in ipairs(keys) do
+    table.insert(items, { slot = slot, raw = slots[slot].raw })
+  end
+
+  vim.ui.select(items, {
+    prompt = "Pinned Words (select to unpin):",
+    format_item = function(item)
+      return string.format("%d: %s", item.slot, item.raw)
+    end,
+  }, function(choice)
+    if choice then
+      M.clear(choice.slot)
+      vim.notify("pinwords: unpinned slot " .. choice.slot, vim.log.levels.INFO)
+    end
+  end)
 end
 
 ---@param slot? integer

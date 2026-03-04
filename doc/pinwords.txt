@@ -34,6 +34,9 @@ SETUP                                                           *pinwords-setup*
     snacks = {
       enabled = false,
     },
+    fzf_lua = {
+      enabled = false,
+    },
   })
 <
 
@@ -86,7 +89,7 @@ COMMANDS                                                       *pinwords-command
   :UnpinWord             Unpin word under cursor.
   :UnpinWord {slot}      Clear slot.
   :UnpinAllWords         Clear all pinned words.
-  :PinWordList           List active pins.
+  :PinWordList           Interactive picker for pinned words.
   :PinWordCwordToggle    Toggle cursor-word highlight (current window, incl. insert).
   :PinWordNext [slot]    Jump to next pinned word occurrence.
   :PinWordPrev [slot]    Jump to previous pinned word occurrence.
@@ -101,6 +104,7 @@ API                                                             *pinwords-api*
   require("pinwords").clear(slot)
   require("pinwords").clear_all()
   require("pinwords").list()
+  require("pinwords").pick()         -- open interactive picker
   require("pinwords").jump_next()    -- jump to next pinned word
   require("pinwords").jump_next(slot) -- jump to next occurrence of specific slot
   require("pinwords").jump_prev()    -- jump to previous pinned word
@@ -163,9 +167,9 @@ PICKER INTEGRATIONS                                        *pinwords-pickers*
   pinwords.nvim provides optional integrations with popular picker plugins for
   browsing and managing pinned words through a fuzzy finder interface.
 
-  Both integrations are completely optional - pinwords.nvim works perfectly
-  without them. They only provide alternative interfaces if you have the
-  picker plugins installed.
+  All picker integrations are completely optional - pinwords.nvim works
+  perfectly without them. When no picker is enabled, :PinWordList uses
+  vim.ui.select as a built-in fallback.
 
   Common Features: ~
     - List all pinned words with slot number and highlight color
@@ -214,6 +218,21 @@ SNACKS.NVIM                                               *pinwords-snacks*
 
   Note: To keep multi-select stable in Snacks, pinwords assigns a unique `id`
   to each entry.
+
+FZF-LUA                                                    *pinwords-fzf-lua*
+
+  fzf-lua integration for pinwords.
+
+  Setup (optional auto-loading): ~
+>
+    require("pinwords").setup({
+      fzf_lua = {
+        enabled = true,
+      },
+    })
+<
+  Usage: ~
+    require("pinwords.fzf_lua").picker({opts})
 
 ==============================================================================
 vim:tw=78:et:ft=help

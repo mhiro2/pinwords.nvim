@@ -96,23 +96,29 @@ T["UnpinAllWords clears all slots"] = function()
   MiniTest.expect.equality(helpers.match_count(), 0)
 end
 
-T["PinWordList shows all pinned words"] = function()
+T["PinWordList opens interactive picker"] = function()
   helpers.setup_buffer({ "foo bar baz" })
 
   require("pinwords").set(1)
   vim.api.nvim_win_set_cursor(0, { 1, 4 })
   require("pinwords").set(2)
 
-  helpers.with_notify_override(function(notified)
-    vim.cmd("PinWordList")
+  local select_called = false
+  local select_items = nil
+  local orig_select = vim.ui.select
+  vim.ui.select = function(items, _opts, _on_choice)
+    select_called = true
+    select_items = items
+  end
 
-    MiniTest.expect.equality(#notified > 0, true)
-    -- Check that the notification contains slot information
-    local msg = notified[1].msg
-    MiniTest.expect.equality(type(msg), "string")
-    MiniTest.expect.equality(msg:find("1:") ~= nil, true)
-    MiniTest.expect.equality(msg:find("2:") ~= nil, true)
-  end)
+  vim.cmd("PinWordList")
+
+  vim.ui.select = orig_select
+
+  MiniTest.expect.equality(select_called, true)
+  MiniTest.expect.equality(#select_items, 2)
+  MiniTest.expect.equality(select_items[1].slot, 1)
+  MiniTest.expect.equality(select_items[2].slot, 2)
 end
 
 T["PinWordList shows message when no words pinned"] = function()
