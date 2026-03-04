@@ -5,7 +5,7 @@
 
 local has_snacks, snacks = pcall(require, "snacks")
 if not has_snacks or not snacks.picker then
-  return nil
+  return false
 end
 
 local pinwords = require("pinwords")

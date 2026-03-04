@@ -574,10 +574,11 @@ function M.setup(opts)
   -- Load Snacks integration if enabled and available
   if config.snacks.enabled then
     local ok, snacks_integration = pcall(require, "pinwords.snacks")
-    if not ok or not snacks_integration then
+    if not ok or type(snacks_integration) ~= "table" then
       warn("snacks.enabled is true but snacks.nvim is not available")
     end
   end
+
 end
 
 ---@param raw string
@@ -719,6 +720,64 @@ end
 function M.list()
   ensure_modules()
   return state.get_slots()
+end
+
+---Open interactive picker for pinned words.
+---Tries enabled pickers in order: snacks -> telescope -> vim.ui.select
+---@return nil
+function M.pick()
+  ensure_modules()
+
+  -- Try snacks
+  if config.snacks.enabled then
+    local ok, snacks_mod = pcall(require, "pinwords.snacks")
+    if ok and type(snacks_mod) == "table" and type(snacks_mod.picker) == "function" then
+      snacks_mod.picker()
+      return
+    end
+  end
+
+  -- Try telescope
+  if config.telescope.enabled then
+    local ok, telescope = pcall(require, "telescope")
+    if ok and telescope then
+      pcall(telescope.load_extension, "pinwords")
+      local ext_ok, ext = pcall(function()
+        return telescope.extensions.pinwords.pinwords
+      end)
+      if ext_ok and ext then
+        ext()
+        return
+      end
+    end
+  end
+
+  -- Fallback: vim.ui.select
+  local slots = state.get_slots()
+  local keys = vim.tbl_keys(slots)
+  table.sort(keys)
+
+  if #keys == 0 then
+    vim.notify("pinwords: no pinned words", vim.log.levels.INFO)
+    return
+  end
+
+  local items = {}
+  for _, slot in ipairs(keys) do
+    table.insert(items, { slot = slot, raw = slots[slot].raw })
+  end
+
+  vim.ui.select(items, {
+    prompt = "Pinned Words (select to unpin):",
+    format_item = function(item)
+      return string.format("%d: %s", item.slot, item.raw)
+    end,
+  }, function(choice)
+    if choice then
+      M.clear(choice.slot)
+      vim.notify("pinwords: unpinned slot " .. choice.slot, vim.log.levels.INFO)
+    end
+  end)
 end
 
 ---@param slot? integer
