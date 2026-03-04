@@ -96,6 +96,11 @@ T["UnpinAllWords clears all slots"] = function()
   MiniTest.expect.equality(helpers.match_count(), 0)
 end
 
+T["PinWordList command description indicates global scope"] = function()
+  local output = vim.api.nvim_exec2("command PinWordList", { output = true }).output
+  MiniTest.expect.equality(output:find("List global pinned words in interactive picker.", 1, true) ~= nil, true)
+end
+
 T["PinWordList opens interactive picker"] = function()
   helpers.setup_buffer({ "foo bar baz" })
 
