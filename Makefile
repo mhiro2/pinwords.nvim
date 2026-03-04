@@ -1,4 +1,4 @@
-.PHONY: deps deps-mini deps-telescope deps-plenary fmt lint stylua stylua-check selene test
+.PHONY: deps deps-mini deps-telescope deps-plenary fmt lint stylua stylua-check selene test bench
 
 NVIM ?= nvim
 GIT ?= git
@@ -37,8 +37,11 @@ stylua-check:
 	stylua --check .
 
 selene:
-	selene ./lua ./plugin ./tests
+	selene ./lua ./plugin ./tests ./bench
 
 test: deps
 	MINI_PATH="$(MINI_PATH)" TELESCOPE_PATH="$(TELESCOPE_PATH)" PLUG_PATH="$(PLUG_PATH)" \
 		$(NVIM) --headless -u tests/minimal_init.lua -c "lua require('tests.run').run()" -c "qa"
+
+bench:
+	$(NVIM) --headless -u NONE -c "lua dofile('bench/run.lua')" -c "qa!"

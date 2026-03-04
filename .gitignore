@@ -1,5 +1,6 @@
 # Local test deps
 deps/
+.nvimlog
 
 
 ### https://raw.githubusercontent.com/github/gitignore/86922aee426c32ffb6098f9a38c42da75169501e/Global/Windows.gitignore
