@@ -438,6 +438,18 @@ local function build_entry(raw, slot, opts)
 end
 
 ---@param win integer
+---@return string
+local function get_cword_for_window(win)
+  local ok, raw = pcall(vim.api.nvim_win_call, win, function()
+    return vim.fn.expand("<cword>")
+  end)
+  if not ok or type(raw) ~= "string" then
+    return ""
+  end
+  return raw
+end
+
+---@param win integer
 local function update_cword_for_window(win)
   local win_state = state.get_win_state(win)
   local cword_state = win_state.cword
@@ -445,7 +457,7 @@ local function update_cword_for_window(win)
     return
   end
 
-  local raw = vim.fn.expand("<cword>")
+  local raw = get_cword_for_window(win)
   local pattern_text = raw ~= "" and build_pattern(raw) or nil
 
   if cword_state.pattern == pattern_text then

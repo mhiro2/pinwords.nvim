@@ -498,6 +498,60 @@ T["init_global_state loads existing state"] = function()
   MiniTest.expect.equality(slots[1].raw, "test")
 end
 
+T["init_global_state resets state when slot metadata is invalid"] = function()
+  helpers.setup_buffer({ "test" })
+
+  vim.g.pinwords_global = {
+    slots = {
+      [1] = { raw = "test", pattern = "test", hl_group = 123 },
+    },
+  }
+
+  local state = require("pinwords.state")
+  state.init_global_state()
+
+  local slots = state.get_slots()
+  MiniTest.expect.equality(next(slots), nil)
+end
+
+T["init_global_state resets state when order or tick metadata is inconsistent"] = function()
+  helpers.setup_buffer({ "test" })
+
+  vim.g.pinwords_global = {
+    slots = {
+      [1] = { raw = "test", pattern = "test", hl_group = "PinWord1" },
+    },
+    order = { 1, 2 }, -- references missing slot 2
+    last_used = { [1] = 3 },
+    tick = 2, -- lower than last_used[1]
+  }
+
+  local state = require("pinwords.state")
+  state.init_global_state()
+
+  local slots = state.get_slots()
+  MiniTest.expect.equality(next(slots), nil)
+end
+
+T["init_global_state keeps state when metadata is consistent"] = function()
+  helpers.setup_buffer({ "test" })
+
+  vim.g.pinwords_global = {
+    slots = {
+      [1] = { raw = "test", pattern = "test", hl_group = "PinWord1" },
+    },
+    order = { 1 },
+    last_used = { [1] = 3 },
+    tick = 3,
+  }
+
+  local state = require("pinwords.state")
+  state.init_global_state()
+
+  local slots = state.get_slots()
+  MiniTest.expect.equality(slots[1].raw, "test")
+end
+
 T["init_global_state fixes invalid slots table internally"] = function()
   helpers.setup_buffer({ "test" })
 

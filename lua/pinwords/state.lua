@@ -67,24 +67,143 @@ local function remove_value(list, value)
   end
 end
 
+---@param value any
+---@return boolean
+local function is_positive_integer(value)
+  return type(value) == "number" and value % 1 == 0 and value >= 1
+end
+
+---@param value any
+---@return boolean
+local function is_non_negative_integer(value)
+  return type(value) == "number" and value % 1 == 0 and value >= 0
+end
+
+---@param entry any
+---@return boolean
+local function validate_slot_entry(entry)
+  return type(entry) == "table"
+    and type(entry.raw) == "string"
+    and type(entry.pattern) == "string"
+    and type(entry.hl_group) == "string"
+end
+
+---@param slots table
+---@return boolean
+local function validate_slots_table(slots)
+  for slot, entry in pairs(slots) do
+    if not is_positive_integer(slot) then
+      return false
+    end
+    if not validate_slot_entry(entry) then
+      return false
+    end
+  end
+  return true
+end
+
+---@param order table
+---@param slots table
+---@return boolean
+local function validate_order_table(order, slots)
+  local seen = {}
+  local key_count = 0
+  for i = 1, #order do
+    local slot = order[i]
+    if not is_positive_integer(slot) then
+      return false
+    end
+    if slots[slot] == nil or seen[slot] then
+      return false
+    end
+    seen[slot] = true
+  end
+
+  for key in pairs(order) do
+    if type(key) ~= "number" or key % 1 ~= 0 or key < 1 then
+      return false
+    end
+    key_count = key_count + 1
+  end
+  if key_count ~= #order then
+    return false
+  end
+  return true
+end
+
+---@param last_used table
+---@param slots table
+---@return boolean
+local function validate_last_used_table(last_used, slots)
+  for slot, used_tick in pairs(last_used) do
+    if not is_positive_integer(slot) then
+      return false
+    end
+    if slots[slot] == nil then
+      return false
+    end
+    if not is_non_negative_integer(used_tick) then
+      return false
+    end
+  end
+  return true
+end
+
+---@param tick any
+---@param last_used table|nil
+---@return boolean
+local function validate_tick(tick, last_used)
+  if not is_non_negative_integer(tick) then
+    return false
+  end
+  if type(last_used) ~= "table" then
+    return true
+  end
+  for _, used_tick in pairs(last_used) do
+    if used_tick > tick then
+      return false
+    end
+  end
+  return true
+end
+
 ---@param state table
 ---@return boolean
 local function validate_global_state(state)
   if type(state) ~= "table" then
     return false
   end
-  if type(state.slots) ~= "table" then
+  local slots = state.slots
+  if type(slots) ~= "table" then
     return false
   end
-  -- Validate each slot entry
-  for slot, entry in pairs(state.slots) do
-    if type(slot) ~= "number" or slot < 1 then
+
+  if not validate_slots_table(slots) then
+    return false
+  end
+
+  if state.order ~= nil then
+    if type(state.order) ~= "table" then
       return false
     end
-    if type(entry) ~= "table" or type(entry.raw) ~= "string" or type(entry.pattern) ~= "string" then
+    if not validate_order_table(state.order, slots) then
       return false
     end
   end
+
+  if state.last_used ~= nil then
+    if type(state.last_used) ~= "table" then
+      return false
+    end
+    if not validate_last_used_table(state.last_used, slots) then
+      return false
+    end
+  end
+
+  if state.tick ~= nil and not validate_tick(state.tick, state.last_used) then
+    return false
+  end
+
   return true
 end
 

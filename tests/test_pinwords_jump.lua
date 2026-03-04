@@ -267,4 +267,29 @@ T["jump works across multiple lines"] = function()
   MiniTest.expect.equality(pos[2], 9) -- "  return [f]oo"
 end
 
+T["jump_next preserves mixed case sensitivity per slot"] = function()
+  helpers.setup_buffer({ "foo Foo BAR bar" })
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
+
+  local pinwords = require("pinwords")
+  pinwords.set(1, { raw = "Foo", case_sensitive = true })
+  pinwords.set(2, { raw = "bar", case_sensitive = false })
+
+  local success = pinwords.jump_next()
+  MiniTest.expect.equality(success, true)
+  MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0)[2], 4) -- "foo [F]oo BAR bar"
+
+  success = pinwords.jump_next()
+  MiniTest.expect.equality(success, true)
+  MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0)[2], 8) -- "foo Foo [B]AR bar"
+
+  success = pinwords.jump_next()
+  MiniTest.expect.equality(success, true)
+  MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0)[2], 12) -- "foo Foo BAR [b]ar"
+
+  success = pinwords.jump_next()
+  MiniTest.expect.equality(success, true)
+  MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0)[2], 4) -- Wrap to "Foo", not "foo"
+end
+
 return T
