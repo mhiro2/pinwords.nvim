@@ -757,6 +757,11 @@ function M.list()
   return state.get_slots()
 end
 
+---@return PinwordsConfig
+function M.get_config()
+  return vim.deepcopy(config)
+end
+
 ---Open interactive picker for pinned words.
 ---Tries enabled pickers in order: snacks -> telescope -> fzf_lua -> vim.ui.select
 ---@return nil

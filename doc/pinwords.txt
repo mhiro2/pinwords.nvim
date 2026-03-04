@@ -8,6 +8,11 @@ Pin words to keep them visible while reading or reviewing code.
 REQUIREMENTS
   - Neovim >= 0.10
 
+HEALTH                                                          *pinwords-health*
+
+  Run `:checkhealth pinwords` to validate current config values and
+  optional picker dependencies.
+
 SETUP                                                           *pinwords-setup*
 >lua
   require("pinwords").setup({
@@ -89,7 +94,7 @@ COMMANDS                                                       *pinwords-command
   :UnpinWord             Unpin word under cursor.
   :UnpinWord {slot}      Clear slot.
   :UnpinAllWords         Clear all pinned words.
-  :PinWordList           Interactive picker for pinned words.
+  :PinWordList           Interactive picker for global pinned words.
   :PinWordCwordToggle    Toggle cursor-word highlight (current window, incl. insert).
   :PinWordNext [slot]    Jump to next pinned word occurrence.
   :PinWordPrev [slot]    Jump to previous pinned word occurrence.

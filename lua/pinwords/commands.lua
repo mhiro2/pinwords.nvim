@@ -177,7 +177,7 @@ function M.setup(max_slots)
 
   vim.api.nvim_create_user_command("PinWordList", function()
     require("pinwords").pick()
-  end, { nargs = 0, force = true, desc = "List pinned words in interactive picker." })
+  end, { nargs = 0, force = true, desc = "List global pinned words in interactive picker." })
 
   vim.api.nvim_create_user_command("PinWordCwordToggle", function()
     require("pinwords").cword_toggle()

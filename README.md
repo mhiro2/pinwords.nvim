@@ -186,10 +186,14 @@ See the [Picker Integrations](#-picker-integrations) section for usage details.
 | `:UnpinWord`            | Unpin word under cursor |
 | `:UnpinWord {slot}`     | Clear slot            |
 | `:UnpinAllWords`        | Clear all             |
-| `:PinWordList`          | Interactive picker for pinned words (falls back to `vim.ui.select`) |
+| `:PinWordList`          | Interactive picker for global pinned words (falls back to `vim.ui.select`) |
 | `:PinWordCwordToggle`   | Toggle cursor-word highlight (current window, follows cursor incl. insert) |
 | `:PinWordNext [slot]`   | Jump to next pinned word occurrence |
 | `:PinWordPrev [slot]`   | Jump to previous pinned word occurrence |
+
+### Health Check
+
+Run `:checkhealth pinwords` to validate current config values and optional picker dependencies.
 
 ### Lua API
 
