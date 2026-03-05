@@ -17,8 +17,7 @@ local function parse_slot(selected, slot_map)
   if slot_map[selected] then
     return slot_map[selected]
   end
-  local num = tonumber(selected:match("^(%d+):"))
-  return num
+  return nil
 end
 
 ---Open fzf-lua picker for pinned words

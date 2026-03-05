@@ -540,10 +540,10 @@ function M.get_win_state(win)
 end
 
 ---@param win integer
----@param state PinwordsWinState
+---@param win_state PinwordsWinState
 ---@return nil
-function M.set_win_state(win, state)
-  pcall(vim.api.nvim_win_set_var, win, "pinwords", state)
+function M.set_win_state(win, win_state)
+  pcall(vim.api.nvim_win_set_var, win, "pinwords", win_state)
 end
 
 ---@return nil
