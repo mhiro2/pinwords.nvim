@@ -107,12 +107,13 @@ require("pinwords").setup({
     [1] = "#ff6b6b",                           -- hex string
     [2] = { bg = "#1dd1a1", fg = "#000000" },  -- with foreground color
     [3] = { bg = "#54a0ff", bold = true },     -- with style attributes
+    [4] = { sp = "#ff6b6b", undercurl = true }, -- colored undercurl (no background)
     cword = "#ffd166",                         -- cursor word color
   },
 })
 ```
 
-Available style attributes: `bold`, `italic`, `underline`, `strikethrough`, `ctermbg`, `ctermfg`.
+Available style attributes: `bold`, `italic`, `underline`, `undercurl`, `underdouble`, `underdotted`, `underdashed`, `strikethrough`, `sp`, `ctermbg`, `ctermfg`.
 
 #### Visual Flash Feedback
 
