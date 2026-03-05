@@ -104,20 +104,69 @@ COMMANDS                                                       *pinwords-command
 
 API                                                             *pinwords-api*
 
-  require("pinwords").set()          -- auto allocation
-  require("pinwords").set(slot)
-  require("pinwords").set(nil, { source = "symbol" }) -- Treesitter symbol pin
-  require("pinwords").toggle()       -- alias for auto set
-  require("pinwords").cword_toggle() -- toggle cursor-word highlight
-  require("pinwords").unpin()        -- unpin word under cursor
-  require("pinwords").clear(slot)
-  require("pinwords").clear_all()
-  require("pinwords").list()
-  require("pinwords").pick()         -- open interactive picker
-  require("pinwords").jump_next()    -- jump to next pinned word
-  require("pinwords").jump_next(slot) -- jump to next occurrence of specific slot
-  require("pinwords").jump_prev()    -- jump to previous pinned word
-  require("pinwords").jump_prev(slot)
+  setup({opts})                                              *pinwords.setup()*
+    Initialize pinwords with optional configuration.
+    Parameters: ~
+      {opts}  (PinwordsConfig|nil) Configuration table.
+
+  set({slot}, {opts})                                          *pinwords.set()*
+    Pin a word to a slot. If slot is nil, auto-allocate.
+    When called without opts.raw, uses word under cursor.
+    Parameters: ~
+      {slot}  (integer|nil) Slot number (1-N). nil for auto allocation.
+      {opts}  (table|nil)   Options table:
+                raw           (string|nil)  Explicit text to pin.
+                whole_word    (boolean|nil) Match whole words only.
+                case_sensitive (boolean|nil) Case-sensitive matching.
+                source        ("cword"|"symbol"|nil) Use Treesitter symbol.
+
+  toggle({opts})                                            *pinwords.toggle()*
+    Toggle pin for word under cursor (alias for set with auto allocation).
+    Parameters: ~
+      {opts}  (table|nil) Same options as set().
+
+  cword_toggle()                                      *pinwords.cword_toggle()*
+    Toggle cursor-word highlight for the current window.
+
+  unpin()                                                   *pinwords.unpin()*
+    Unpin the word under cursor if it is currently pinned.
+
+  clear({slot})                                              *pinwords.clear()*
+    Clear the pinned word in the given slot.
+    Parameters: ~
+      {slot}  (integer) Slot number to clear.
+
+  clear_all()                                            *pinwords.clear_all()*
+    Clear all pinned words from every slot.
+
+  list()                                                     *pinwords.list()*
+    Return all currently pinned slots.
+    Returns: ~
+      table<integer, PinwordsSlot>
+
+  get_config()                                          *pinwords.get_config()*
+    Return a deep copy of the current configuration.
+    Returns: ~
+      PinwordsConfig
+
+  pick()                                                     *pinwords.pick()*
+    Open interactive picker for pinned words.
+    Tries enabled pickers in order: snacks -> telescope -> fzf_lua ->
+    vim.ui.select.
+
+  jump_next({slot})                                      *pinwords.jump_next()*
+    Jump to the next occurrence of a pinned word.
+    Parameters: ~
+      {slot}  (integer|nil) Slot to restrict search, or nil for all slots.
+    Returns: ~
+      boolean  true if a match was found.
+
+  jump_prev({slot})                                      *pinwords.jump_prev()*
+    Jump to the previous occurrence of a pinned word.
+    Parameters: ~
+      {slot}  (integer|nil) Slot to restrict search, or nil for all slots.
+    Returns: ~
+      boolean  true if a match was found.
 
 CUSTOM COLORS                                                  *pinwords-colors*
 

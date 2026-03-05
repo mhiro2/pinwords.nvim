@@ -519,6 +519,7 @@ local function flash_feedback(pattern_text)
   flash.flash_pattern(win, pattern_text)
 end
 
+---Initialize pinwords with optional configuration.
 ---@param opts? PinwordsConfig
 ---@return nil
 function M.setup(opts)
@@ -650,8 +651,10 @@ local function apply_slot(raw, slot, opts)
   matcher.apply_slot_globally(slot, entry)
 end
 
----@param slot? integer
----@param opts? PinwordsSetOpts
+---Pin a word to a slot. If slot is nil, auto-allocate.
+---When called without opts.raw, uses word under cursor.
+---@param slot? integer Slot number (1-N). nil for auto allocation.
+---@param opts? PinwordsSetOpts Options including raw text, whole_word, case_sensitive.
 ---@return nil
 function M.set(slot, opts)
   ensure_modules()
@@ -696,7 +699,8 @@ function M.set(slot, opts)
   flash_feedback(pattern_text)
 end
 
----@param slot integer
+---Clear the pinned word in the given slot.
+---@param slot integer Slot number to clear.
 ---@return nil
 function M.clear(slot)
   ensure_modules()
@@ -713,12 +717,14 @@ function M.clear(slot)
   end
 end
 
----@param opts? PinwordsSetOpts
+---Toggle pin for word under cursor (alias for set with auto allocation).
+---@param opts? PinwordsSetOpts Options including raw text, whole_word, case_sensitive.
 ---@return nil
 function M.toggle(opts)
   M.set(nil, opts)
 end
 
+---Toggle cursor-word highlight for the current window.
 ---@return nil
 function M.cword_toggle()
   ensure_modules()
@@ -753,6 +759,7 @@ function M.cword_toggle()
   end
 end
 
+---Unpin the word under cursor if it is currently pinned.
 ---@return nil
 function M.unpin()
   ensure_modules()
@@ -768,6 +775,7 @@ function M.unpin()
   end
 end
 
+---Clear all pinned words from every slot.
 ---@return nil
 function M.clear_all()
   ensure_modules()
@@ -775,12 +783,14 @@ function M.clear_all()
   matcher.clear_all_globally()
 end
 
+---Return all currently pinned slots.
 ---@return table<integer, PinwordsSlot>
 function M.list()
   ensure_modules()
   return state.get_slots()
 end
 
+---Return a deep copy of the current configuration.
 ---@return PinwordsConfig
 function M.get_config()
   return vim.deepcopy(config)
@@ -853,7 +863,8 @@ function M.pick()
   end)
 end
 
----@param slot? integer
+---Jump to the next occurrence of a pinned word.
+---@param slot? integer Slot number to restrict search, or nil for all slots.
 ---@return boolean success
 function M.jump_next(slot)
   ensure_modules()
@@ -863,7 +874,8 @@ function M.jump_next(slot)
   return jump.next(slot)
 end
 
----@param slot? integer
+---Jump to the previous occurrence of a pinned word.
+---@param slot? integer Slot number to restrict search, or nil for all slots.
 ---@return boolean success
 function M.jump_prev(slot)
   ensure_modules()
@@ -885,6 +897,7 @@ function M.flush_cword_timer()
   end
 end
 
+---Tear down pinwords: stop timers, remove autocmds, clear all state.
 ---@return nil
 function M.teardown()
   ensure_modules()

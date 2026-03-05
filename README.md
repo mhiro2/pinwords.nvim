@@ -54,13 +54,13 @@ Using lazy.nvim:
     pinwords.setup()
 
     -- Auto pin/unpin word under cursor (auto allocation)
-    map("n", "<leader>p", pinwords.set, { desc = "Pin word toggle" })
+    map("n", "<leader>p", function() pinwords.set() end, { desc = "Pin word toggle" })
 
     -- Pin selected text in visual mode
     map("x", "<leader>p", ":PinWord<cr>", { desc = "Pin selection" })
 
     -- Toggle cursor-word highlight (follows cursor, works in insert mode)
-    map("n", "<leader>j", pinwords.cword_toggle, { desc = "Toggle cword highlight" })
+    map("n", "<leader>j", function() pinwords.cword_toggle() end, { desc = "Toggle cword highlight" })
   end,
 }
 ```
@@ -215,6 +215,23 @@ require("pinwords").jump_next()    -- jump to next pinned word
 require("pinwords").jump_next(slot) -- jump to next occurrence of specific slot
 require("pinwords").jump_prev()    -- jump to previous pinned word
 require("pinwords").jump_prev(slot)
+```
+
+The second argument to `set()` accepts a table with the following fields:
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `raw` | `string` | word under cursor | Explicit text to pin (bypasses `<cword>`). |
+| `whole_word` | `boolean` | config value | Match whole words only (`\<...\>`). |
+| `case_sensitive` | `boolean` | config value | Case-sensitive matching. |
+| `source` | `"cword"\|"symbol"` | `"cword"` | Use Treesitter symbol instead of `<cword>`. |
+
+```lua
+-- Pin an arbitrary string (raw mode)
+require("pinwords").set(1, { raw = "TODO", whole_word = true })
+
+-- Pin case-sensitively
+require("pinwords").set(nil, { case_sensitive = true })
 ```
 
 ## 🔍 Picker Integrations
