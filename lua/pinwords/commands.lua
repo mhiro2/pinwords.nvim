@@ -157,6 +157,22 @@ function M.setup(max_slots)
     desc = "Pin word (auto allocation). With visual range, pin selection.",
   })
 
+  vim.api.nvim_create_user_command("PinWordSymbol", function(opts)
+    ---@cast opts PinwordsCommandOpts
+    local slot
+    if opts.args ~= "" then
+      slot = parse_slot(opts.args, max_slots, true)
+      if not slot then
+        return
+      end
+    end
+    require("pinwords").set(slot, { source = "symbol" })
+  end, {
+    nargs = "?",
+    force = true,
+    desc = "Pin symbol at cursor using Treesitter (falls back to cword).",
+  })
+
   vim.api.nvim_create_user_command("UnpinWord", function(opts)
     ---@cast opts PinwordsCommandOpts
     if opts.args == "" then
