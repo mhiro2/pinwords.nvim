@@ -48,9 +48,14 @@ end
 ---@class PinwordsColorSpec
 ---@field bg? string         -- background color (hex)
 ---@field fg? string         -- foreground color (hex)
+---@field sp? string         -- special color for underline/undercurl (hex)
 ---@field bold? boolean
 ---@field italic? boolean
 ---@field underline? boolean
+---@field undercurl? boolean
+---@field underdouble? boolean
+---@field underdotted? boolean
+---@field underdashed? boolean
 ---@field strikethrough? boolean
 ---@field ctermbg? integer
 ---@field ctermfg? integer
@@ -161,6 +166,10 @@ local function validate_color(value, slot_name)
     end
     if value.fg ~= nil and not is_valid_hex(value.fg) then
       warn(slot_name .. ".fg must be a valid hex color; ignoring")
+      return nil
+    end
+    if value.sp ~= nil and not is_valid_hex(value.sp) then
+      warn(slot_name .. ".sp must be a valid hex color; ignoring")
       return nil
     end
     return value

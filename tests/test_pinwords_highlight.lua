@@ -177,6 +177,87 @@ T["highlight defines PinWordFlash by default"] = function()
   helpers.clear_hl("PinWordFlash")
 end
 
+T["highlight applies sp (special color)"] = function()
+  local highlight = require("pinwords.highlight")
+
+  helpers.clear_hl("PinWord1")
+  highlight.apply(1, { [1] = { sp = "#ff0000", underline = true } })
+
+  local hl = vim.api.nvim_get_hl(0, { name = "PinWord1", link = false })
+  MiniTest.expect.equality(hl.sp, 0xff0000)
+  MiniTest.expect.equality(hl.underline, true)
+  -- bg should not be set
+  MiniTest.expect.equality(hl.bg, nil)
+
+  helpers.clear_hl("PinWord1")
+end
+
+T["highlight applies undercurl style"] = function()
+  local highlight = require("pinwords.highlight")
+
+  helpers.clear_hl("PinWord1")
+  highlight.apply(1, { [1] = { sp = "#54a0ff", undercurl = true } })
+
+  local hl = vim.api.nvim_get_hl(0, { name = "PinWord1", link = false })
+  MiniTest.expect.equality(hl.sp, 0x54a0ff)
+  MiniTest.expect.equality(hl.undercurl, true)
+
+  helpers.clear_hl("PinWord1")
+end
+
+T["highlight applies underdouble style"] = function()
+  local highlight = require("pinwords.highlight")
+
+  helpers.clear_hl("PinWord1")
+  highlight.apply(1, { [1] = { sp = "#feca57", underdouble = true } })
+
+  local hl = vim.api.nvim_get_hl(0, { name = "PinWord1", link = false })
+  MiniTest.expect.equality(hl.sp, 0xfeca57)
+  MiniTest.expect.equality(hl.underdouble, true)
+
+  helpers.clear_hl("PinWord1")
+end
+
+T["highlight applies underdotted style"] = function()
+  local highlight = require("pinwords.highlight")
+
+  helpers.clear_hl("PinWord1")
+  highlight.apply(1, { [1] = { sp = "#1dd1a1", underdotted = true } })
+
+  local hl = vim.api.nvim_get_hl(0, { name = "PinWord1", link = false })
+  MiniTest.expect.equality(hl.sp, 0x1dd1a1)
+  MiniTest.expect.equality(hl.underdotted, true)
+
+  helpers.clear_hl("PinWord1")
+end
+
+T["highlight applies underdashed style"] = function()
+  local highlight = require("pinwords.highlight")
+
+  helpers.clear_hl("PinWord1")
+  highlight.apply(1, { [1] = { sp = "#5f27cd", underdashed = true } })
+
+  local hl = vim.api.nvim_get_hl(0, { name = "PinWord1", link = false })
+  MiniTest.expect.equality(hl.sp, 0x5f27cd)
+  MiniTest.expect.equality(hl.underdashed, true)
+
+  helpers.clear_hl("PinWord1")
+end
+
+T["highlight applies sp with bg combined"] = function()
+  local highlight = require("pinwords.highlight")
+
+  helpers.clear_hl("PinWord1")
+  highlight.apply(1, { [1] = { bg = "#5f27cd", sp = "#ff6b6b", undercurl = true } })
+
+  local hl = vim.api.nvim_get_hl(0, { name = "PinWord1", link = false })
+  MiniTest.expect.equality(hl.sp, 0xff6b6b)
+  MiniTest.expect.equality(hl.undercurl, true)
+  MiniTest.expect.equality(type(hl.bg) == "number", true)
+
+  helpers.clear_hl("PinWord1")
+end
+
 T["highlight uses default for unspecified slots"] = function()
   local highlight = require("pinwords.highlight")
 
