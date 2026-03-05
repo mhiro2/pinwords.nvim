@@ -22,6 +22,7 @@ local bench_modules = {
   "bench.bench_set_clear",
   "bench.bench_jump",
   "bench.bench_cword",
+  "bench.bench_symbol",
 }
 
 local helpers = require("bench.bench_helpers")
