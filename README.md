@@ -183,6 +183,8 @@ See the [Picker Integrations](#-picker-integrations) section for usage details.
 | ----------------------- | --------------------- |
 | `:PinWord`              | Auto pin (toggle same). In visual mode, pins selection. |
 | `:PinWord {slot}`       | Pin word under cursor (visual mode uses selection). |
+| `:PinWordSymbol`        | Pin symbol at cursor using Treesitter (auto allocation). |
+| `:PinWordSymbol {slot}` | Pin symbol at cursor to specific slot. Falls back to cword when no parser or no symbol found. |
 | `:UnpinWord`            | Unpin word under cursor |
 | `:UnpinWord {slot}`     | Clear slot            |
 | `:UnpinAllWords`        | Clear all             |
@@ -200,6 +202,7 @@ Run `:checkhealth pinwords` to validate current config values and optional picke
 ```lua
 require("pinwords").set()          -- auto allocation
 require("pinwords").set(slot)
+require("pinwords").set(nil, { source = "symbol" }) -- Treesitter symbol pin
 require("pinwords").toggle()       -- alias for auto set
 require("pinwords").cword_toggle() -- toggle cursor-word highlight
 require("pinwords").unpin()        -- unpin word under cursor

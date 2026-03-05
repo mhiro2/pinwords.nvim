@@ -12,11 +12,14 @@ local matcher
 local pattern
 ---@type table|nil
 local state
+---@type table|nil
+local symbol
 
 local M = {}
 local AUGROUP_NAME = "PinWords"
 local COMMAND_NAMES = {
   "PinWord",
+  "PinWordSymbol",
   "UnpinWord",
   "UnpinAllWords",
   "PinWordList",
@@ -106,6 +109,7 @@ end
 ---@field raw? string
 ---@field whole_word? boolean
 ---@field case_sensitive? boolean
+---@field source? "cword"|"symbol"
 
 ---@type PinwordsConfig
 local default_config = {
@@ -406,7 +410,18 @@ end
 ---@param empty_message? string
 ---@return string|nil
 local function resolve_raw(opts, empty_message)
-  local raw = opts and opts.raw or vim.fn.expand("<cword>")
+  local raw = opts and opts.raw
+  if not raw then
+    if opts and opts.source == "symbol" then
+      if not symbol then
+        symbol = require("pinwords.symbol")
+      end
+      raw = symbol.get_symbol_at_cursor()
+    end
+    if not raw then
+      raw = vim.fn.expand("<cword>")
+    end
+  end
   if raw == "" then
     vim.notify(empty_message or "pinwords: no word to pin", vim.log.levels.WARN)
     return nil
