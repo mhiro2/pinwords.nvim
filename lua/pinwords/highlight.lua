@@ -144,8 +144,6 @@ local function build_hl_opts(spec, default_cterm)
   if spec.bg then
     opts.bg = spec.bg
     opts.ctermbg = spec.ctermbg or hex_to_cterm(spec.bg) or default_cterm
-  else
-    opts.ctermbg = spec.ctermbg or default_cterm
   end
 
   if spec.fg then
@@ -164,8 +162,24 @@ local function build_hl_opts(spec, default_cterm)
   if spec.underline then
     opts.underline = true
   end
+  if spec.undercurl then
+    opts.undercurl = true
+  end
+  if spec.underdouble then
+    opts.underdouble = true
+  end
+  if spec.underdotted then
+    opts.underdotted = true
+  end
+  if spec.underdashed then
+    opts.underdashed = true
+  end
   if spec.strikethrough then
     opts.strikethrough = true
+  end
+
+  if spec.sp then
+    opts.sp = spec.sp
   end
 
   return opts
