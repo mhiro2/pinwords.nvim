@@ -32,9 +32,9 @@ local default_cword_cterm = 221
 ---@param hex string
 ---@return integer, integer, integer
 local function hex_to_rgb(hex)
-  local r = tonumber(hex:sub(2, 3), 16)
-  local g = tonumber(hex:sub(4, 5), 16)
-  local b = tonumber(hex:sub(6, 7), 16)
+  local r = tonumber(hex:sub(2, 3), 16) or 0
+  local g = tonumber(hex:sub(4, 5), 16) or 0
+  local b = tonumber(hex:sub(6, 7), 16) or 0
   return r, g, b
 end
 

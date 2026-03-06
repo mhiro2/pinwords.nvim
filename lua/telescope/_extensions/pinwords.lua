@@ -42,7 +42,7 @@ local function make_entry(_opts)
   local displayer = entry_display.create({
     separator = " ",
     items = {
-      { width = 2 },
+      { width = 3 },
       { width = 50 },
     },
   })

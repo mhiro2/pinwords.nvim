@@ -113,8 +113,25 @@ local function get_visual_selection()
     end
 
     local col0 = math.min(math.max(col - 1, 0), line_len - 1)
-    local char_idx = vim.str_utfindex(line, col0)
-    return math.min(vim.str_byteindex(line, char_idx + 1), line_len)
+    local ok, char_idx
+    if vim.fn.has("nvim-0.11") == 1 then
+      ok, char_idx = pcall(vim.str_utfindex, line, "utf-32", col0)
+    else
+      ok, char_idx = pcall(vim.str_utfindex, line, col0)
+    end
+    if not ok then
+      return line_len
+    end
+    local ok2, byte_idx
+    if vim.fn.has("nvim-0.11") == 1 then
+      ok2, byte_idx = pcall(vim.str_byteindex, line, "utf-32", char_idx + 1)
+    else
+      ok2, byte_idx = pcall(vim.str_byteindex, line, char_idx + 1)
+    end
+    if not ok2 then
+      return line_len
+    end
+    return math.min(byte_idx, line_len)
   end
 
   local first_line_len = #lines[1]

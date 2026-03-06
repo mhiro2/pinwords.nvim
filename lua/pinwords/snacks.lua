@@ -95,7 +95,7 @@ local function pinwords_picker(opts)
 
   -- Early exit if empty
   if #items == 0 then
-    vim.notify("pinwords: no pinned words", vim.log.levels.WARN)
+    vim.notify("pinwords: no pinned words", vim.log.levels.INFO)
     return
   end
 

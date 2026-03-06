@@ -207,7 +207,8 @@ local function validate_global_state(state)
   return true
 end
 
--- Initialize global state from vim.g or create new
+---Initialize global state from vim.g or create new.
+---@return nil
 function M.init_global_state()
   -- Flush any pending sync to ensure we load the latest state
   if sync_pending then
@@ -255,7 +256,8 @@ local function prune_table_slots(field, max_slots)
   return changed
 end
 
----@param max_slots integer
+---Remove slots exceeding max_slots from global state.
+---@param max_slots integer Maximum number of slots to keep.
 ---@return nil
 function M.prune_global_state(max_slots)
   if type(max_slots) ~= "number" then
@@ -540,12 +542,13 @@ function M.get_win_state(win)
 end
 
 ---@param win integer
----@param state PinwordsWinState
+---@param win_state PinwordsWinState
 ---@return nil
-function M.set_win_state(win, state)
-  pcall(vim.api.nvim_win_set_var, win, "pinwords", state)
+function M.set_win_state(win, win_state)
+  pcall(vim.api.nvim_win_set_var, win, "pinwords", win_state)
 end
 
+---Reset global state and remove the vim.g variable.
 ---@return nil
 function M.teardown()
   global_state = { slots = {} }

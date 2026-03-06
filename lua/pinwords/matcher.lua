@@ -116,9 +116,32 @@ function M.reapply_all_for_window(win)
     return
   end
 
+  local win_state = state.get_win_state(win)
+  local current_ids = win_state.match_ids
+  local slots = state.get_slots()
+
+  -- Skip reapply if all slot keys match and all match_ids are present
+  local needs_reapply = false
+  for slot in pairs(slots) do
+    if not current_ids[slot] then
+      needs_reapply = true
+      break
+    end
+  end
+  if not needs_reapply then
+    for slot in pairs(current_ids) do
+      if not slots[slot] then
+        needs_reapply = true
+        break
+      end
+    end
+  end
+  if not needs_reapply then
+    return
+  end
+
   clear_all_for_window(win)
 
-  local slots = state.get_slots()
   for slot, entry in pairs(slots) do
     M.apply_slot_for_window(win, slot, entry)
   end
