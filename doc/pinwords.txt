@@ -101,6 +101,8 @@ COMMANDS                                                       *pinwords-command
   :PinWordCwordToggle    Toggle cursor-word highlight (current window, incl. insert).
   :PinWordNext [slot]    Jump to next pinned word occurrence.
   :PinWordPrev [slot]    Jump to previous pinned word occurrence.
+  :PinWordGrep [slot]    Grep pinned words across project.
+  :PinWordLiveGrep [slot] Live grep pinned words across project.
 
 API                                                             *pinwords-api*
 
@@ -168,6 +170,22 @@ API                                                             *pinwords-api*
     Returns: ~
       boolean  true if a match was found.
 
+  grep({opts})                                              *pinwords.grep()*
+    Grep pinned words across the project.
+    All pinned words are combined with OR into a single search pattern, while
+    each slot keeps its own whole_word/case_sensitive behavior. Uses the best
+    available picker backend.
+    Parameters: ~
+      {opts}  (table|nil)   Options table:
+                slot  (integer|nil) Specific slot to grep, or nil for all.
+
+  live_grep({opts})                                    *pinwords.live_grep()*
+    Live grep pinned words across the project.
+    Opens an interactive live grep with pinned words as the initial query.
+    Parameters: ~
+      {opts}  (table|nil)   Options table:
+                slot  (integer|nil) Specific slot to grep, or nil for all.
+
 CUSTOM COLORS                                                  *pinwords-colors*
 
   Customize highlight colors per slot:
@@ -226,6 +244,35 @@ HIGHLIGHTS                                                     *pinwords-highlig
   PinWord1 .. PinWord9
   PinWordCword
   PinWordFlash
+
+GREP INTEGRATION                                              *pinwords-grep*
+
+  Search your entire project using pinned words. All pinned words are combined
+  with OR into a single search pattern, while each slot keeps its own
+  whole_word/case_sensitive behavior.
+
+  Commands: ~
+    :PinWordGrep            Grep all pinned words (OR combined).
+    :PinWordGrep {slot}     Grep a specific slot's word only.
+    :PinWordLiveGrep        Open live grep with pinned words as initial query.
+    :PinWordLiveGrep {slot} Open live grep with a specific slot's word.
+
+  Picker Backend: ~
+    Grep uses the same priority as other picker features:
+    snacks -> telescope -> fzf-lua -> vimgrep (quickfix) fallback.
+    Grep backends are line-oriented, so multi-line pinned words are skipped.
+    When no picker backend is available, both commands fall back to one-shot
+    quickfix grep via vimgrep.
+
+  Example Key Mappings: ~
+>lua
+    vim.keymap.set("n", "<leader>pg", function()
+      require("pinwords").grep()
+    end, { desc = "Grep pinned words" })
+    vim.keymap.set("n", "<leader>pl", function()
+      require("pinwords").live_grep()
+    end, { desc = "Live grep pinned words" })
+<
 
 PICKER INTEGRATIONS                                        *pinwords-pickers*
 

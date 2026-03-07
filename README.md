@@ -18,6 +18,7 @@ Unlike navigation-oriented word highlighters, pinwords lets you **explicitly mar
 - 🧠 Designed for **thinking, reading, and reviewing**, not navigation
 - 🪟 Correct behavior across **split windows**
 - ⚡ Pure **Neovim native API** (Lua-only, no Vim script)
+- 🔍 **Grep integration** — search project-wide with pinned words via telescope/snacks/fzf-lua
 - 🧩 Clean internal design for future extensions
 
 ![movie](https://github.com/user-attachments/assets/5b65e319-f309-4f15-b6ff-806c0148cab6)
@@ -153,6 +154,17 @@ vim.keymap.set("n", "]1", function() require("pinwords").jump_next(1) end, { des
 vim.keymap.set("n", "[1", function() require("pinwords").jump_prev(1) end, { desc = "Prev slot 1" })
 ```
 
+#### Grep / Live Grep
+
+Search your project using pinned words while preserving each slot's match semantics:
+
+```lua
+vim.keymap.set("n", "<leader>pg", function() require("pinwords").grep() end, { desc = "Grep pinned words" })
+vim.keymap.set("n", "<leader>pl", function() require("pinwords").live_grep() end, { desc = "Live grep pinned words" })
+```
+
+See the [Grep Integration](#-grep-integration) section for details.
+
 #### Picker Integrations
 
 Enable auto-loading of optional picker extensions (disabled by default to avoid forcing dependencies at startup):
@@ -193,6 +205,8 @@ See the [Picker Integrations](#-picker-integrations) section for usage details.
 | `:PinWordCwordToggle`   | Toggle cursor-word highlight (current window, follows cursor incl. insert) |
 | `:PinWordNext [slot]`   | Jump to next pinned word occurrence |
 | `:PinWordPrev [slot]`   | Jump to previous pinned word occurrence |
+| `:PinWordGrep [slot]`   | Grep pinned words across project |
+| `:PinWordLiveGrep [slot]` | Live grep pinned words across project |
 
 ### Health Check
 
@@ -215,6 +229,10 @@ require("pinwords").jump_next()    -- jump to next pinned word
 require("pinwords").jump_next(slot) -- jump to next occurrence of specific slot
 require("pinwords").jump_prev()    -- jump to previous pinned word
 require("pinwords").jump_prev(slot)
+require("pinwords").grep()         -- grep all pinned words (OR combined, per-slot semantics preserved)
+require("pinwords").grep({ slot = 1 }) -- grep specific slot
+require("pinwords").live_grep()    -- live grep with pinned words as initial query
+require("pinwords").live_grep({ slot = 1 })
 ```
 
 The second argument to `set()` accepts a table with the following fields:
@@ -327,6 +345,28 @@ vim.keymap.set("n", "<leader>fp", function()
 end, { desc = "fzf-lua: Pinned words" })
 ```
 
+## 🔍 Grep Integration
+
+Search your entire project using pinned words. All pinned words are combined with OR into a single search pattern, while each slot keeps its own `whole_word` / `case_sensitive` behavior.
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `:PinWordGrep` | Grep all pinned words (OR combined) |
+| `:PinWordGrep {slot}` | Grep a specific slot's word only |
+| `:PinWordLiveGrep` | Open live grep with pinned words as the initial query |
+| `:PinWordLiveGrep {slot}` | Open live grep with a specific slot's word |
+
+### Picker Backend
+
+Grep uses the same priority as other picker features: **snacks → telescope → fzf-lua → vimgrep (quickfix) fallback**.
+
+No additional configuration is needed — if you have a picker enabled for `:PinWordList`, grep will use the same backend automatically.
+
+> [!NOTE]
+> Grep backends are line-oriented, so multi-line pinned words are skipped.
+> When no picker backend is available, both commands fall back to one-shot quickfix grep via `vimgrep`.
 ## 🎨 Highlight Groups
 
 ```vim
