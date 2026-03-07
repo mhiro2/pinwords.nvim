@@ -1,0 +1,413 @@
+local MiniTest = require("mini.test")
+local helpers = require("tests.test_helpers")
+
+local T = helpers.create_test_set()
+
+local grep = require("pinwords.grep")
+
+---@param module_name string
+---@param value any
+---@param fn fun()
+local function with_loaded_module(module_name, value, fn)
+  local previous = package.loaded[module_name]
+  package.loaded[module_name] = value
+
+  local ok, err = pcall(fn)
+  package.loaded[module_name] = previous
+
+  if not ok then
+    error(err)
+  end
+end
+
+---@param slot integer
+---@param raw string
+---@param pattern string
+---@return PinwordsSlot
+local function slot_entry(slot, raw, pattern)
+  return {
+    raw = raw,
+    pattern = pattern,
+    hl_group = "PinWord" .. slot,
+  }
+end
+
+-- ==========================================================================
+-- build_rg_pattern
+-- ==========================================================================
+
+T["build_rg_pattern returns nil when no slots"] = function()
+  local result = grep.build_rg_pattern({}, nil)
+  MiniTest.expect.equality(result, nil)
+end
+
+T["build_rg_pattern returns nil for missing slot"] = function()
+  local slots = { [1] = slot_entry(1, "foo", "\\V\\Cfoo") }
+  local result = grep.build_rg_pattern(slots, 5)
+  MiniTest.expect.equality(result, nil)
+end
+
+T["build_rg_pattern returns single word for one slot"] = function()
+  local slots = { [1] = slot_entry(1, "foo", "\\V\\Cfoo") }
+  local result = grep.build_rg_pattern(slots, nil)
+  MiniTest.expect.equality(result, "foo")
+end
+
+T["build_rg_pattern returns specific slot when specified"] = function()
+  local slots = {
+    [1] = slot_entry(1, "foo", "\\V\\Cfoo"),
+    [2] = slot_entry(2, "bar", "\\V\\Cbar"),
+  }
+  local result = grep.build_rg_pattern(slots, 2)
+  MiniTest.expect.equality(result, "bar")
+end
+
+T["build_rg_pattern joins multiple words with OR"] = function()
+  local slots = {
+    [1] = slot_entry(1, "foo", "\\V\\Cfoo"),
+    [2] = slot_entry(2, "bar", "\\V\\Cbar"),
+    [3] = slot_entry(3, "baz", "\\V\\Cbaz"),
+  }
+  local result = grep.build_rg_pattern(slots, nil)
+  MiniTest.expect.equality(result, "foo|bar|baz")
+end
+
+T["build_rg_pattern sorts by slot number"] = function()
+  local slots = {
+    [3] = slot_entry(3, "baz", "\\V\\Cbaz"),
+    [1] = slot_entry(1, "foo", "\\V\\Cfoo"),
+  }
+  local result = grep.build_rg_pattern(slots, nil)
+  MiniTest.expect.equality(result, "foo|baz")
+end
+
+T["build_rg_pattern escapes ripgrep metacharacters"] = function()
+  local slots = {
+    [1] = slot_entry(1, "foo.bar", "\\V\\Cfoo.bar"),
+    [2] = slot_entry(2, "a+b*c", "\\V\\Ca+b*c"),
+  }
+  local result = grep.build_rg_pattern(slots, nil)
+  MiniTest.expect.equality(result, "foo\\.bar|a\\+b\\*c")
+end
+
+T["build_rg_pattern escapes parentheses and brackets"] = function()
+  local slots = {
+    [1] = slot_entry(1, "fn(x)", "\\V\\Cfn(x)"),
+    [2] = slot_entry(2, "a[0]", "\\V\\Ca[0]"),
+  }
+  local result = grep.build_rg_pattern(slots, nil)
+  MiniTest.expect.equality(result, "fn\\(x\\)|a\\[0\\]")
+end
+
+T["build_rg_pattern escapes pipe and backslash"] = function()
+  local slots = {
+    [1] = slot_entry(1, "a|b", "\\V\\Ca|b"),
+    [2] = slot_entry(2, "c\\d", "\\V\\Cc\\\\d"),
+  }
+  local result = grep.build_rg_pattern(slots, nil)
+  MiniTest.expect.equality(result, "a\\|b|c\\\\d")
+end
+
+T["build_rg_pattern escapes caret and dollar"] = function()
+  local slots = {
+    [1] = slot_entry(1, "^start", "\\V\\C^start"),
+    [2] = slot_entry(2, "end$", "\\V\\Cend$"),
+  }
+  local result = grep.build_rg_pattern(slots, nil)
+  MiniTest.expect.equality(result, "\\^start|end\\$")
+end
+
+T["build_rg_pattern preserves per-slot match semantics"] = function()
+  local slots = {
+    [1] = slot_entry(1, "Foo", "\\V\\CFoo"),
+    [2] = slot_entry(2, "bar", "\\V\\c\\<bar\\>"),
+  }
+  local result = grep.build_rg_pattern(slots, nil)
+  MiniTest.expect.equality(result, "Foo|(?i:\\bbar\\b)")
+end
+
+-- ==========================================================================
+-- build_vim_pattern
+-- ==========================================================================
+
+T["build_vim_pattern returns nil when no slots"] = function()
+  local result = grep.build_vim_pattern({}, nil)
+  MiniTest.expect.equality(result, nil)
+end
+
+T["build_vim_pattern uses very nomagic with OR alternation"] = function()
+  local slots = {
+    [1] = slot_entry(1, "foo.bar", "\\V\\Cfoo.bar"),
+    [2] = slot_entry(2, "a+b*c", "\\V\\Ca+b*c"),
+  }
+  local result = grep.build_vim_pattern(slots, nil)
+  MiniTest.expect.equality(result, "\\V\\(\\Cfoo.bar\\|\\Ca+b*c\\)")
+end
+
+T["build_vim_pattern keeps slash and literal pipe in words"] = function()
+  local slots = {
+    [1] = slot_entry(1, "foo/bar", "\\V\\Cfoo/bar"),
+    [2] = slot_entry(2, "a|b", "\\V\\Ca|b"),
+  }
+  local result = grep.build_vim_pattern(slots, nil)
+  MiniTest.expect.equality(result, "\\V\\(\\Cfoo/bar\\|\\Ca|b\\)")
+end
+
+T["build_vim_pattern applies whole-word prefixes"] = function()
+  local slots = {
+    [1] = slot_entry(1, "foo", "\\V\\C\\<foo\\>"),
+  }
+  local result = grep.build_vim_pattern(slots, nil)
+  MiniTest.expect.equality(result, "\\V\\C\\<foo\\>")
+end
+
+T["build_vim_pattern preserves mixed slot semantics"] = function()
+  local slots = {
+    [1] = slot_entry(1, "Foo", "\\V\\CFoo"),
+    [2] = slot_entry(2, "bar", "\\V\\c\\<bar\\>"),
+  }
+  local result = grep.build_vim_pattern(slots, nil)
+  MiniTest.expect.equality(result, "\\V\\(\\CFoo\\|\\c\\<bar\\>\\)")
+end
+
+-- ==========================================================================
+-- Command registration
+-- ==========================================================================
+
+T["PinWordGrep command is registered"] = function()
+  helpers.setup_buffer({ "foo bar baz" })
+  local output = vim.api.nvim_exec2("command PinWordGrep", { output = true }).output
+  MiniTest.expect.equality(output:find("Grep pinned words across project.", 1, true) ~= nil, true)
+end
+
+T["PinWordLiveGrep command is registered"] = function()
+  helpers.setup_buffer({ "foo bar baz" })
+  local output = vim.api.nvim_exec2("command PinWordLiveGrep", { output = true }).output
+  MiniTest.expect.equality(output:find("Live grep pinned words across project.", 1, true) ~= nil, true)
+end
+
+-- ==========================================================================
+-- API integration (notify on empty / unsupported)
+-- ==========================================================================
+
+T["grep notifies when no words pinned"] = function()
+  helpers.setup_buffer({ "foo bar baz" })
+
+  helpers.with_notify_override(function(notified)
+    require("pinwords").grep()
+
+    MiniTest.expect.equality(#notified > 0, true)
+    MiniTest.expect.equality(notified[1].msg:find("no pinned words", 1, true) ~= nil, true)
+  end)
+end
+
+T["live_grep notifies when no words pinned"] = function()
+  helpers.setup_buffer({ "foo bar baz" })
+
+  helpers.with_notify_override(function(notified)
+    require("pinwords").live_grep()
+
+    MiniTest.expect.equality(#notified > 0, true)
+    MiniTest.expect.equality(notified[1].msg:find("no pinned words", 1, true) ~= nil, true)
+  end)
+end
+
+T["grep rejects multi-line-only pins"] = function()
+  helpers.setup_buffer({ "foo bar", "baz qux" })
+
+  local pinwords = require("pinwords")
+  pinwords.set(1, { raw = "foo\nbaz", whole_word = false })
+
+  helpers.with_notify_override(function(notified)
+    pinwords.grep()
+
+    MiniTest.expect.equality(#notified > 0, true)
+    MiniTest.expect.equality(notified[1].msg:find("supports only single-line pinned words", 1, true) ~= nil, true)
+    MiniTest.expect.equality(notified[1].level, vim.log.levels.WARN)
+  end)
+end
+
+T["grep with invalid slot from command shows error"] = function()
+  helpers.setup_buffer({ "foo bar baz" })
+
+  helpers.with_notify_override(function(notified)
+    vim.cmd("PinWordGrep 0")
+    MiniTest.expect.equality(#notified > 0, true)
+  end)
+end
+
+T["PinWordLiveGrep with invalid slot shows error"] = function()
+  helpers.setup_buffer({ "foo bar baz" })
+
+  helpers.with_notify_override(function(notified)
+    vim.cmd("PinWordLiveGrep 0")
+    MiniTest.expect.equality(#notified > 0, true)
+  end)
+end
+
+-- ==========================================================================
+-- Backend integration
+-- ==========================================================================
+
+T["grep preserves per-slot match semantics in ripgrep pattern"] = function()
+  helpers.setup_buffer({ "foo FOO bar BAR" })
+
+  local captured = {}
+  local fzf_stub = {
+    grep = function(opts)
+      captured = opts
+    end,
+    live_grep = function(_opts) end,
+  }
+
+  local pinwords = require("pinwords")
+  with_loaded_module("fzf-lua", fzf_stub, function()
+    with_loaded_module("pinwords.fzf_lua", nil, function()
+      pinwords.setup({
+        whole_word = false,
+        case_sensitive = true,
+        telescope = { enabled = false },
+        snacks = { enabled = false },
+        fzf_lua = { enabled = true },
+      })
+      pinwords.set(1, { raw = "Foo" })
+      pinwords.set(2, { raw = "bar", whole_word = true, case_sensitive = false })
+      pinwords.grep()
+    end)
+  end)
+
+  MiniTest.expect.equality(captured.search, "Foo|(?i:\\bbar\\b)")
+end
+
+T["live_grep uses selected slot semantics"] = function()
+  helpers.setup_buffer({ "foo FOO bar BAR" })
+
+  local captured = {}
+  local fzf_stub = {
+    grep = function(_opts) end,
+    live_grep = function(opts)
+      captured = opts
+    end,
+  }
+
+  local pinwords = require("pinwords")
+  with_loaded_module("fzf-lua", fzf_stub, function()
+    with_loaded_module("pinwords.fzf_lua", nil, function()
+      pinwords.setup({
+        whole_word = false,
+        case_sensitive = false,
+        telescope = { enabled = false },
+        snacks = { enabled = false },
+        fzf_lua = { enabled = true },
+      })
+      pinwords.set(1, { raw = "foo", whole_word = true, case_sensitive = true })
+      pinwords.set(2, { raw = "bar", whole_word = false, case_sensitive = false })
+      pinwords.live_grep({ slot = 1 })
+    end)
+  end)
+
+  MiniTest.expect.equality(captured.search, "\\bfoo\\b")
+end
+
+T["grep skips multi-line words when searchable slots remain"] = function()
+  helpers.setup_buffer({ "foo bar", "baz qux" })
+
+  local captured = {}
+  local fzf_stub = {
+    grep = function(opts)
+      captured = opts
+    end,
+    live_grep = function(_opts) end,
+  }
+
+  local pinwords = require("pinwords")
+  with_loaded_module("fzf-lua", fzf_stub, function()
+    with_loaded_module("pinwords.fzf_lua", nil, function()
+      pinwords.setup({
+        whole_word = false,
+        case_sensitive = true,
+        telescope = { enabled = false },
+        snacks = { enabled = false },
+        fzf_lua = { enabled = true },
+      })
+      pinwords.set(1, { raw = "foo\nbaz", whole_word = false })
+      pinwords.set(2, { raw = "qux" })
+
+      helpers.with_notify_override(function(notified)
+        pinwords.grep()
+        MiniTest.expect.equality(captured.search, "qux")
+        MiniTest.expect.equality(#notified > 0, true)
+        MiniTest.expect.equality(notified[1].msg:find("skipped 1 multi-line pinned word", 1, true) ~= nil, true)
+      end)
+    end)
+  end)
+end
+
+-- ==========================================================================
+-- Fallback integration
+-- ==========================================================================
+
+T["fallback grep uses vim.fn.vimgrep and preserves slot semantics"] = function()
+  local slots = {
+    [1] = slot_entry(1, "foo/bar", "\\V\\cfoo/bar"),
+  }
+
+  local captured = {}
+  local orig_vimgrep = vim.fn.vimgrep
+  local orig_getqflist = vim.fn.getqflist
+  local orig_nvim_command = vim.api.nvim_command
+
+  vim.fn.vimgrep = function(pattern, files, flags)
+    captured.pattern = pattern
+    captured.files = files
+    captured.flags = flags
+    return 0
+  end
+  vim.fn.getqflist = function(_opts)
+    return { size = 1 }
+  end
+  vim.api.nvim_command = function(cmd)
+    captured.command = cmd
+  end
+
+  local ok, err = pcall(function()
+    grep._fallback_grep(slots, nil)
+  end)
+
+  vim.fn.vimgrep = orig_vimgrep
+  vim.fn.getqflist = orig_getqflist
+  vim.api.nvim_command = orig_nvim_command
+
+  MiniTest.expect.equality(ok, true)
+  MiniTest.expect.equality(err, nil)
+  MiniTest.expect.equality(captured.pattern, "\\V\\cfoo/bar")
+  MiniTest.expect.equality(captured.files, "**/*")
+  MiniTest.expect.equality(captured.flags, "gj")
+  MiniTest.expect.equality(captured.command, "copen")
+end
+
+T["fallback grep treats E480 no-match as info notification"] = function()
+  local slots = {
+    [1] = slot_entry(1, "notfound", "\\V\\cnotfound"),
+  }
+
+  local orig_vimgrep = vim.fn.vimgrep
+  vim.fn.vimgrep = function(_pattern, _files, _flags)
+    error("Vim:E480: No match: notfound")
+  end
+
+  local ok, err = pcall(function()
+    helpers.with_notify_override(function(notified)
+      grep._fallback_grep(slots, nil)
+      MiniTest.expect.equality(#notified > 0, true)
+      MiniTest.expect.equality(notified[1].msg:find("grep found no matches", 1, true) ~= nil, true)
+      MiniTest.expect.equality(notified[1].level, vim.log.levels.INFO)
+    end)
+  end)
+  vim.fn.vimgrep = orig_vimgrep
+
+  MiniTest.expect.equality(ok, true)
+  MiniTest.expect.equality(err, nil)
+end
+
+return T

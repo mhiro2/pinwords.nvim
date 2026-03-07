@@ -26,6 +26,8 @@ local COMMAND_NAMES = {
   "PinWordCwordToggle",
   "PinWordNext",
   "PinWordPrev",
+  "PinWordGrep",
+  "PinWordLiveGrep",
 }
 
 ---@return nil
@@ -883,6 +885,22 @@ function M.jump_prev(slot)
     return false
   end
   return jump.prev(slot)
+end
+
+---Grep pinned words across the project.
+---@param opts? { slot?: integer }
+---@return nil
+function M.grep(opts)
+  ensure_modules()
+  require("pinwords.grep").grep(opts)
+end
+
+---Live grep pinned words across the project.
+---@param opts? { slot?: integer }
+---@return nil
+function M.live_grep(opts)
+  ensure_modules()
+  require("pinwords.grep").live_grep(opts)
 end
 
 --- Flush debounced cword update immediately (for testing)
