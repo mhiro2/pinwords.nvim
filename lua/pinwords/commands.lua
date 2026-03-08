@@ -239,6 +239,30 @@ function M.setup(max_slots)
     end
     require("pinwords").jump_prev(slot)
   end, { nargs = "?", force = true, desc = "Jump to previous pinned word occurrence." })
+
+  vim.api.nvim_create_user_command("PinWordGrep", function(opts)
+    ---@cast opts PinwordsCommandOpts
+    local slot
+    if opts.args ~= "" then
+      slot = parse_slot(opts.args, max_slots, true)
+      if not slot then
+        return
+      end
+    end
+    require("pinwords").grep({ slot = slot })
+  end, { nargs = "?", force = true, desc = "Grep pinned words across project." })
+
+  vim.api.nvim_create_user_command("PinWordLiveGrep", function(opts)
+    ---@cast opts PinwordsCommandOpts
+    local slot
+    if opts.args ~= "" then
+      slot = parse_slot(opts.args, max_slots, true)
+      if not slot then
+        return
+      end
+    end
+    require("pinwords").live_grep({ slot = slot })
+  end, { nargs = "?", force = true, desc = "Live grep pinned words across project." })
 end
 
 return M
