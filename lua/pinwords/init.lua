@@ -11,7 +11,7 @@ local matcher
 ---@type table|nil
 local pattern
 ---@type table|nil
-local runtime_cword
+local runtime
 ---@type table|nil
 local state
 ---@type table|nil
@@ -45,7 +45,7 @@ local function ensure_modules()
   jump = require("pinwords.jump")
   matcher = require("pinwords.matcher")
   pattern = require("pinwords.pattern")
-  runtime_cword = require("pinwords.runtime.cword")
+  runtime = require("pinwords.runtime")
   state = require("pinwords.state")
 end
 
@@ -124,19 +124,6 @@ end
 
 ---@type PinwordsConfig
 local config = config_module.default_config()
-
----@type table<integer, boolean>
-local pending_reapply_wins = {}
-
----@param args table|nil
----@return integer
-local function resolve_autocmd_win(args)
-  local win = type(args) == "table" and args.win or nil
-  if type(win) ~= "number" or win == 0 then
-    win = vim.api.nvim_get_current_win()
-  end
-  return win
-end
 
 ---@param value any
 ---@param fallback any
@@ -231,7 +218,6 @@ end
 function M.setup(opts)
   ensure_modules()
   config = config_module.sanitize(opts, warn)
-  runtime_cword.configure({ build_pattern = build_pattern })
 
   -- Initialize global state
   state.init_global_state()
@@ -242,56 +228,11 @@ function M.setup(opts)
 
   -- Prune global state when slots are reduced
   state.prune_global_state(config.slots)
-
-  -- Rebuild window-local matches from global state
-  runtime_cword.cleanup_stale_windows()
-  for _, win in ipairs(vim.api.nvim_list_wins()) do
-    matcher.reapply_all_for_window(win)
-    runtime_cword.reapply_for_window(win)
-  end
-
-  local group = vim.api.nvim_create_augroup(AUGROUP_NAME, { clear = true })
-
-  vim.api.nvim_create_autocmd({ "BufWinEnter", "WinEnter" }, {
-    group = group,
-    callback = function(args)
-      local win = resolve_autocmd_win(args)
-      if pending_reapply_wins[win] then
-        return
-      end
-      pending_reapply_wins[win] = true
-      vim.schedule(function()
-        pending_reapply_wins[win] = nil
-      end)
-
-      matcher.reapply_all_for_window(win)
-      runtime_cword.reapply_for_window(win)
-    end,
-  })
-
-  vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
-    group = group,
-    callback = function()
-      runtime_cword.handle_cursor_moved(vim.api.nvim_get_current_win())
-    end,
-  })
-
-  vim.api.nvim_create_autocmd("ColorScheme", {
-    group = group,
-    callback = function()
-      highlight.apply(config.slots, config.colors)
-    end,
-  })
-
-  vim.api.nvim_create_autocmd("WinClosed", {
-    group = group,
-    callback = function(args)
-      local win = tonumber(args.match)
-      if win then
-        runtime_cword.handle_win_closed(win)
-        flash.clear_for_window(win)
-      end
-    end,
+  runtime.setup({
+    augroup_name = AUGROUP_NAME,
+    slots = config.slots,
+    colors = config.colors,
+    build_pattern = build_pattern,
   })
 
   -- Load Telescope extension if enabled and available
@@ -408,7 +349,7 @@ end
 ---@return nil
 function M.cword_toggle()
   ensure_modules()
-  runtime_cword.toggle(vim.api.nvim_get_current_win())
+  runtime.toggle_cword()
 end
 
 ---Unpin the word under cursor if it is currently pinned.
@@ -556,15 +497,14 @@ end
 --- Flush debounced cword update immediately (for testing)
 function M.flush_cword_timer()
   ensure_modules()
-  runtime_cword.flush_current()
+  runtime.flush_cword()
 end
 
 ---Tear down pinwords: stop timers, remove autocmds, clear all state.
 ---@return nil
 function M.teardown()
   ensure_modules()
-  runtime_cword.teardown()
-  pcall(vim.api.nvim_del_augroup_by_name, AUGROUP_NAME)
+  runtime.teardown()
   flash.clear_all()
 
   matcher.clear_all_globally()
@@ -573,7 +513,6 @@ function M.teardown()
     pcall(vim.api.nvim_del_user_command, command_name)
   end
 
-  pending_reapply_wins = {}
   state.teardown()
 end
 

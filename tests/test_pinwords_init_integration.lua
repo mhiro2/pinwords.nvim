@@ -48,6 +48,8 @@ T["setup lazy-loads internal modules"] = function()
     "pinwords.jump",
     "pinwords.matcher",
     "pinwords.pattern",
+    "pinwords.runtime",
+    "pinwords.runtime.cword",
     "pinwords.state",
   }
   for _, module_name in ipairs(modules) do
@@ -61,6 +63,8 @@ T["setup lazy-loads internal modules"] = function()
   MiniTest.expect.equality(package.loaded["pinwords.jump"], nil)
   MiniTest.expect.equality(package.loaded["pinwords.matcher"], nil)
   MiniTest.expect.equality(package.loaded["pinwords.pattern"], nil)
+  MiniTest.expect.equality(package.loaded["pinwords.runtime"], nil)
+  MiniTest.expect.equality(package.loaded["pinwords.runtime.cword"], nil)
   MiniTest.expect.equality(package.loaded["pinwords.state"], nil)
 
   pinwords.setup({ slots = 3 })
@@ -70,6 +74,8 @@ T["setup lazy-loads internal modules"] = function()
   MiniTest.expect.equality(type(package.loaded["pinwords.jump"]), "table")
   MiniTest.expect.equality(type(package.loaded["pinwords.matcher"]), "table")
   MiniTest.expect.equality(type(package.loaded["pinwords.pattern"]), "table")
+  MiniTest.expect.equality(type(package.loaded["pinwords.runtime"]), "table")
+  MiniTest.expect.equality(type(package.loaded["pinwords.runtime.cword"]), "table")
   MiniTest.expect.equality(type(package.loaded["pinwords.state"]), "table")
 end
 
