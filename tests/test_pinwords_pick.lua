@@ -154,4 +154,34 @@ T["pick() falls back when fzf_lua module is non-table"] = function()
   MiniTest.expect.equality(select_called, true)
 end
 
+T["pick() falls back when telescope extension is unavailable"] = function()
+  helpers.setup_buffer({ "foo bar baz" })
+
+  local pinwords = require("pinwords")
+  pinwords.setup({
+    telescope = { enabled = true },
+    snacks = { enabled = false },
+    fzf_lua = { enabled = false },
+  })
+  pinwords.set(1)
+
+  local select_called = false
+  local orig_select = vim.ui.select
+  vim.ui.select = function(_items, _opts, _on_choice)
+    select_called = true
+  end
+
+  with_loaded_module("telescope", {
+    load_extension = function() end,
+    extensions = {},
+  }, function()
+    local ok = pcall(pinwords.pick)
+    MiniTest.expect.equality(ok, true)
+  end)
+
+  vim.ui.select = orig_select
+
+  MiniTest.expect.equality(select_called, true)
+end
+
 return T
