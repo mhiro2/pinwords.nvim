@@ -33,7 +33,7 @@ function M.create_test_set()
 
         -- Reset window-local cword state.
         -- It can leak across cases because it's stored in window vars and a
-        -- module-local table inside `pinwords`.
+        -- module-local table inside the cword runtime.
         local win = vim.api.nvim_get_current_win()
         local win_state = require("pinwords.state").get_win_state(win)
         if win_state.cword and win_state.cword.enabled then

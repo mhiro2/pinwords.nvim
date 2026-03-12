@@ -11,6 +11,8 @@ local matcher
 ---@type table|nil
 local pattern
 ---@type table|nil
+local runtime
+---@type table|nil
 local state
 ---@type table|nil
 local symbol
@@ -43,6 +45,7 @@ local function ensure_modules()
   jump = require("pinwords.jump")
   matcher = require("pinwords.matcher")
   pattern = require("pinwords.pattern")
+  runtime = require("pinwords.runtime")
   state = require("pinwords.state")
 end
 
@@ -122,61 +125,6 @@ end
 ---@type PinwordsConfig
 local config = config_module.default_config()
 
--- Windows where cword highlight is enabled (winid -> true)
----@type table<integer, boolean>
-local cword_enabled_wins = {}
----@type table<integer, boolean>
-local pending_reapply_wins = {}
-
-local cword_timer = nil
-local CWORD_DEBOUNCE_MS = 50
-
----@param args table|nil
----@return integer
-local function resolve_autocmd_win(args)
-  local win = type(args) == "table" and args.win or nil
-  if type(win) ~= "number" or win == 0 then
-    win = vim.api.nvim_get_current_win()
-  end
-  return win
-end
-
----@return nil
-local function stop_cword_timer()
-  if not cword_timer then
-    return
-  end
-  pcall(function()
-    cword_timer:stop()
-  end)
-  pcall(function()
-    cword_timer:close()
-  end)
-  cword_timer = nil
-end
-
----@param win integer
----@return boolean
-local function is_cword_enabled(win)
-  if cword_enabled_wins[win] ~= true then
-    return false
-  end
-  if not vim.api.nvim_win_is_valid(win) then
-    cword_enabled_wins[win] = nil -- Lazy cleanup
-    return false
-  end
-  return true
-end
-
----@return nil
-local function cleanup_stale_cword_wins()
-  for win in pairs(cword_enabled_wins) do
-    if type(win) ~= "number" or not vim.api.nvim_win_is_valid(win) then
-      cword_enabled_wins[win] = nil
-    end
-  end
-end
-
 ---@param value any
 ---@param fallback any
 ---@return any
@@ -249,49 +197,6 @@ local function build_entry(raw, slot, opts)
   }
 end
 
----@param win integer
----@return string
-local function get_cword_for_window(win)
-  local ok, raw = pcall(vim.api.nvim_win_call, win, function()
-    return vim.fn.expand("<cword>")
-  end)
-  if not ok or type(raw) ~= "string" then
-    return ""
-  end
-  return raw
-end
-
----@param win integer
-local function update_cword_for_window(win)
-  local win_state = state.get_win_state(win)
-  local cword_state = win_state.cword
-  if type(cword_state) ~= "table" or not cword_state.enabled then
-    return
-  end
-
-  local raw = get_cword_for_window(win)
-  local pattern_text = raw ~= "" and build_pattern(raw) or nil
-
-  if cword_state.pattern == pattern_text then
-    return
-  end
-
-  if pattern_text then
-    local id = matcher.apply_cword_for_window(win, cword_state.match_id, pattern_text)
-    cword_state.match_id = id
-    cword_state.pattern = pattern_text
-  else
-    if cword_state.match_id then
-      matcher.delete_match_id_for_window(win, cword_state.match_id)
-    end
-    cword_state.match_id = nil
-    cword_state.pattern = nil
-  end
-
-  win_state.cword = cword_state
-  state.set_win_state(win, win_state)
-end
-
 ---@param pattern_text string|nil
 ---@return nil
 local function flash_feedback(pattern_text)
@@ -323,83 +228,11 @@ function M.setup(opts)
 
   -- Prune global state when slots are reduced
   state.prune_global_state(config.slots)
-
-  -- Rebuild window-local matches from global state
-  cleanup_stale_cword_wins()
-  for _, win in ipairs(vim.api.nvim_list_wins()) do
-    matcher.reapply_all_for_window(win)
-    if is_cword_enabled(win) then
-      update_cword_for_window(win)
-    end
-  end
-
-  local group = vim.api.nvim_create_augroup(AUGROUP_NAME, { clear = true })
-
-  vim.api.nvim_create_autocmd({ "BufWinEnter", "WinEnter" }, {
-    group = group,
-    callback = function(args)
-      local win = resolve_autocmd_win(args)
-      if pending_reapply_wins[win] then
-        return
-      end
-      pending_reapply_wins[win] = true
-      vim.schedule(function()
-        pending_reapply_wins[win] = nil
-      end)
-
-      matcher.reapply_all_for_window(win)
-      if is_cword_enabled(win) then
-        update_cword_for_window(win)
-      end
-    end,
-  })
-
-  vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
-    group = group,
-    callback = function()
-      if next(cword_enabled_wins) == nil then
-        return
-      end
-      local win = vim.api.nvim_get_current_win()
-      if not is_cword_enabled(win) then
-        return
-      end
-      if cword_timer then
-        cword_timer:stop()
-      end
-      if not cword_timer then
-        cword_timer = vim.uv.new_timer()
-      end
-      cword_timer:start(
-        CWORD_DEBOUNCE_MS,
-        0,
-        vim.schedule_wrap(function()
-          -- Use captured win, not current win at timer fire time
-          if not is_cword_enabled(win) then
-            return
-          end
-          update_cword_for_window(win)
-        end)
-      )
-    end,
-  })
-
-  vim.api.nvim_create_autocmd("ColorScheme", {
-    group = group,
-    callback = function()
-      highlight.apply(config.slots, config.colors)
-    end,
-  })
-
-  vim.api.nvim_create_autocmd("WinClosed", {
-    group = group,
-    callback = function(args)
-      local win = tonumber(args.match)
-      if win then
-        cword_enabled_wins[win] = nil
-        flash.clear_for_window(win)
-      end
-    end,
+  runtime.setup({
+    augroup_name = AUGROUP_NAME,
+    slots = config.slots,
+    colors = config.colors,
+    build_pattern = build_pattern,
   })
 
   -- Load Telescope extension if enabled and available
@@ -516,35 +349,7 @@ end
 ---@return nil
 function M.cword_toggle()
   ensure_modules()
-  local win = vim.api.nvim_get_current_win()
-
-  if not vim.api.nvim_win_is_valid(win) then
-    return
-  end
-
-  local win_state = state.get_win_state(win)
-  local cword_state = win_state.cword or { enabled = false }
-  local was_enabled = cword_state.enabled
-  cword_state.enabled = not cword_state.enabled
-
-  if not was_enabled and cword_state.enabled then
-    cword_enabled_wins[win] = true
-    win_state.cword = cword_state
-    state.set_win_state(win, win_state)
-    update_cword_for_window(win)
-    return
-  end
-
-  if was_enabled and not cword_state.enabled then
-    cword_enabled_wins[win] = nil
-    if cword_state.match_id then
-      matcher.delete_match_id_for_window(win, cword_state.match_id)
-    end
-    cword_state.match_id = nil
-    cword_state.pattern = nil
-    win_state.cword = cword_state
-    state.set_win_state(win, win_state)
-  end
+  runtime.toggle_cword()
 end
 
 ---Unpin the word under cursor if it is currently pinned.
@@ -692,40 +497,22 @@ end
 --- Flush debounced cword update immediately (for testing)
 function M.flush_cword_timer()
   ensure_modules()
-  if cword_timer then
-    cword_timer:stop()
-  end
-  local win = vim.api.nvim_get_current_win()
-  if is_cword_enabled(win) then
-    update_cword_for_window(win)
-  end
+  runtime.flush_cword()
 end
 
 ---Tear down pinwords: stop timers, remove autocmds, clear all state.
 ---@return nil
 function M.teardown()
   ensure_modules()
-  stop_cword_timer()
-  pcall(vim.api.nvim_del_augroup_by_name, AUGROUP_NAME)
+  runtime.teardown()
   flash.clear_all()
 
   matcher.clear_all_globally()
-  for _, win in ipairs(vim.api.nvim_list_wins()) do
-    if vim.api.nvim_win_is_valid(win) then
-      matcher.clear_cword_for_window(win)
-
-      local win_state = state.get_win_state(win)
-      win_state.cword = { enabled = false }
-      state.set_win_state(win, win_state)
-    end
-  end
 
   for _, command_name in ipairs(COMMAND_NAMES) do
     pcall(vim.api.nvim_del_user_command, command_name)
   end
 
-  cword_enabled_wins = {}
-  pending_reapply_wins = {}
   state.teardown()
 end
 
