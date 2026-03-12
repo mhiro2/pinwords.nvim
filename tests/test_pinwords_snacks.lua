@@ -3,71 +3,197 @@ local helpers = require("tests.test_helpers")
 
 local T = helpers.create_test_set()
 
-local has_snacks = pcall(require, "snacks")
+---@param module_name string
+---@param value any
+---@param fn fun()
+local function with_loaded_module(module_name, value, fn)
+  local previous = package.loaded[module_name]
+  package.loaded[module_name] = value
 
-if not has_snacks then
-  -- Skip tests if snacks is not installed
-  return T
+  local ok, err = pcall(fn)
+  package.loaded[module_name] = previous
+
+  if not ok then
+    error(err)
+  end
 end
 
-T["snacks integration loads successfully"] = function()
-  local ok, snacks_integration = pcall(require, "pinwords.snacks")
-
-  MiniTest.expect.equality(ok, true)
-  MiniTest.expect.equality(type(snacks_integration.picker), "function")
+---@param stub table
+---@param fn fun()
+local function with_snacks_stub(stub, fn)
+  with_loaded_module("snacks", stub, function()
+    with_loaded_module("pinwords.snacks", nil, fn)
+  end)
 end
 
-T["pinwords list works correctly"] = function()
-  helpers.setup_buffer({ "foo bar baz" })
+---@param items PinwordsSnacksItem[]
+---@param opts? { current?: PinwordsSnacksItem|nil, selected?: PinwordsSnacksItem[] }
+---@return PinwordsSnacksPicker & { closed: boolean }
+local function fake_picker(items, opts)
+  local picker = {
+    closed = false,
+    _current = opts and opts.current or items[1],
+    _selected = opts and opts.selected or {},
+  }
 
-  local pinwords = require("pinwords")
-
-  pinwords.set(1)
-  vim.api.nvim_win_set_cursor(0, { 1, 5 })
-  pinwords.set(2)
-
-  local slots = pinwords.list()
-  MiniTest.expect.equality(slots[1].raw, "foo")
-  MiniTest.expect.equality(slots[2].raw, "bar")
-end
-
-T["pinwords entries have required fields"] = function()
-  helpers.setup_buffer({ "foo bar baz" })
-
-  local pinwords = require("pinwords")
-
-  pinwords.set(1)
-
-  local slots = pinwords.list()
-
-  MiniTest.expect.equality(type(slots[1]), "table")
-  MiniTest.expect.equality(type(slots[1].raw), "string")
-  MiniTest.expect.equality(type(slots[1].pattern), "string")
-  MiniTest.expect.equality(type(slots[1].hl_group), "string")
-  MiniTest.expect.equality(slots[1].hl_group, "PinWord1")
-end
-
-T["picker handles empty state"] = function()
-  helpers.setup_buffer({ "foo bar" })
-
-  local pinwords = require("pinwords")
-
-  -- Ensure no pins
-  pinwords.clear_all()
-
-  -- Should notify and return without opening picker
-  local notifications = {}
-  local orig_notify = vim.notify
-  vim.notify = function(msg, level)
-    table.insert(notifications, { msg = msg, level = level })
+  function picker:current()
+    return self._current
   end
 
-  require("pinwords.snacks").picker()
+  function picker:selected()
+    return self._selected
+  end
 
-  vim.notify = orig_notify
+  function picker:close()
+    self.closed = true
+  end
 
-  MiniTest.expect.equality(#notifications, 1)
-  MiniTest.expect.equality(notifications[1].msg:find("no pinned words") ~= nil, true)
+  return picker
+end
+
+T["snacks picker builds sorted items"] = function()
+  helpers.setup_buffer({ "foo bar baz" })
+
+  local captured_opts
+  local snacks_stub = {
+    picker = {
+      pick = function(opts)
+        captured_opts = opts
+      end,
+    },
+  }
+
+  local pinwords = require("pinwords")
+  vim.api.nvim_win_set_cursor(0, { 1, 8 })
+  pinwords.set(3)
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
+  pinwords.set(1)
+
+  with_snacks_stub(snacks_stub, function()
+    local snacks_integration = require("pinwords.snacks")
+    snacks_integration.picker()
+  end)
+
+  MiniTest.expect.equality(captured_opts.items[1].slot, 1)
+  MiniTest.expect.equality(captured_opts.items[2].slot, 3)
+  MiniTest.expect.equality(captured_opts.title, "Pinned Words")
+end
+
+T["snacks confirm unpins selected entries"] = function()
+  helpers.setup_buffer({ "foo bar baz" })
+
+  local captured_opts
+  local snacks_stub = {
+    picker = {
+      pick = function(opts)
+        captured_opts = opts
+      end,
+    },
+  }
+
+  local pinwords = require("pinwords")
+  pinwords.set(1)
+  vim.api.nvim_win_set_cursor(0, { 1, 4 })
+  pinwords.set(2)
+
+  with_snacks_stub(snacks_stub, function()
+    require("pinwords.snacks").picker()
+  end)
+
+  helpers.with_notify_override(function(notified)
+    local picker = fake_picker(captured_opts.items, {
+      selected = { captured_opts.items[1], captured_opts.items[2] },
+    })
+
+    captured_opts.confirm(picker, captured_opts.items[1])
+
+    MiniTest.expect.equality(picker.closed, true)
+    MiniTest.expect.equality(pinwords.list()[1], nil)
+    MiniTest.expect.equality(pinwords.list()[2], nil)
+    MiniTest.expect.equality(notified[1].msg, "pinwords: unpinned 2 slot(s)")
+  end)
+end
+
+T["snacks action unpins current entry"] = function()
+  helpers.setup_buffer({ "foo bar baz" })
+
+  local captured_opts
+  local snacks_stub = {
+    picker = {
+      pick = function(opts)
+        captured_opts = opts
+      end,
+    },
+  }
+
+  local pinwords = require("pinwords")
+  pinwords.set(1)
+
+  with_snacks_stub(snacks_stub, function()
+    require("pinwords.snacks").picker()
+  end)
+
+  helpers.with_notify_override(function(notified)
+    local picker = fake_picker(captured_opts.items)
+    captured_opts.actions.unpin_single(picker)
+
+    MiniTest.expect.equality(picker.closed, true)
+    MiniTest.expect.equality(pinwords.list()[1], nil)
+    MiniTest.expect.equality(notified[1].msg, "pinwords: unpinned slot 1")
+  end)
+end
+
+T["snacks action clears all entries"] = function()
+  helpers.setup_buffer({ "foo bar baz" })
+
+  local captured_opts
+  local snacks_stub = {
+    picker = {
+      pick = function(opts)
+        captured_opts = opts
+      end,
+    },
+  }
+
+  local pinwords = require("pinwords")
+  pinwords.set(1)
+  vim.api.nvim_win_set_cursor(0, { 1, 4 })
+  pinwords.set(2)
+
+  with_snacks_stub(snacks_stub, function()
+    require("pinwords.snacks").picker()
+  end)
+
+  helpers.with_notify_override(function(notified)
+    local picker = fake_picker(captured_opts.items)
+    captured_opts.actions.clear_all(picker)
+
+    MiniTest.expect.equality(picker.closed, true)
+    MiniTest.expect.equality(next(pinwords.list()), nil)
+    MiniTest.expect.equality(notified[1].msg, "pinwords: cleared all pins")
+  end)
+end
+
+T["snacks picker handles empty state"] = function()
+  helpers.setup_buffer({ "foo bar" })
+
+  local called = false
+  local snacks_stub = {
+    picker = {
+      pick = function()
+        called = true
+      end,
+    },
+  }
+
+  with_snacks_stub(snacks_stub, function()
+    helpers.with_notify_override(function(notified)
+      require("pinwords.snacks").picker()
+
+      MiniTest.expect.equality(called, false)
+      MiniTest.expect.equality(notified[1].msg, "pinwords: no pinned words")
+    end)
+  end)
 end
 
 return T

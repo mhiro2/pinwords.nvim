@@ -14,7 +14,7 @@ local pickers = require("telescope.pickers")
 local finders = require("telescope.finders")
 local conf = require("telescope.config").values
 local entry_display = require("telescope.pickers.entry_display")
-local pinwords = require("pinwords")
+local picker_common = require("pinwords.picker")
 
 ---@class PinwordsTelescopeItem
 ---@field slot integer
@@ -68,27 +68,27 @@ end
 local function attach_mappings(prompt_bufnr, map)
   ---@param entries PinwordsTelescopeEntry[]
   local function unpin_entries(entries)
+    local slots = {}
     for _, entry in ipairs(entries) do
       if entry.value then
-        pinwords.clear(entry.value.slot)
+        slots[#slots + 1] = entry.value.slot
       end
     end
+    picker_common.unpin_slots(slots)
   end
 
   actions.select_default:replace(function()
     ---@type PinwordsTelescopePicker
-    local picker = action_state.get_current_picker(prompt_bufnr)
-    local multi_selection = picker:get_multi_selection()
+    local current_picker = action_state.get_current_picker(prompt_bufnr)
+    local multi_selection = current_picker:get_multi_selection()
     local selection = action_state.get_selected_entry()
 
     actions.close(prompt_bufnr)
 
     if #multi_selection > 0 then
       unpin_entries(multi_selection)
-      vim.notify("pinwords: unpinned " .. #multi_selection .. " slot(s)", vim.log.levels.INFO)
     elseif selection and selection.value then
-      pinwords.clear(selection.value.slot)
-      vim.notify("pinwords: unpinned slot " .. selection.value.slot, vim.log.levels.INFO)
+      picker_common.unpin_slot(selection.value.slot)
     end
   end)
 
@@ -96,14 +96,13 @@ local function attach_mappings(prompt_bufnr, map)
     local selection = action_state.get_selected_entry()
     actions.close(prompt_bufnr)
     if selection and selection.value then
-      pinwords.clear(selection.value.slot)
+      picker_common.unpin_slot(selection.value.slot)
     end
   end)
 
   map("i", "<C-x>", function()
     actions.close(prompt_bufnr)
-    pinwords.clear_all()
-    vim.notify("pinwords: cleared all pins", vim.log.levels.INFO)
+    picker_common.clear_all()
   end)
 
   return true
@@ -113,25 +112,11 @@ end
 local function pinwords_picker(opts)
   opts = opts or {}
 
-  local slots = pinwords.list()
-
   ---@type PinwordsTelescopeItem[]
-  local results = {}
-  for slot, entry in pairs(slots) do
-    table.insert(results, {
-      slot = slot,
-      raw = entry.raw,
-      pattern = entry.pattern,
-      hl_group = entry.hl_group,
-    })
-  end
-
-  table.sort(results, function(a, b)
-    return a.slot < b.slot
-  end)
+  local results = picker_common.list_items()
 
   if #results == 0 then
-    vim.notify("pinwords: no pinned words", vim.log.levels.WARN)
+    picker_common.notify_empty(vim.log.levels.WARN)
     return
   end
 

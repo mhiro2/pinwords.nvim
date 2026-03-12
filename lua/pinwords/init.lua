@@ -11,6 +11,8 @@ local matcher
 ---@type table|nil
 local pattern
 ---@type table|nil
+local picker
+---@type table|nil
 local runtime
 ---@type table|nil
 local state
@@ -45,6 +47,7 @@ local function ensure_modules()
   jump = require("pinwords.jump")
   matcher = require("pinwords.matcher")
   pattern = require("pinwords.pattern")
+  picker = require("pinwords.picker")
   runtime = require("pinwords.runtime")
   state = require("pinwords.state")
 end
@@ -394,66 +397,7 @@ end
 ---@return nil
 function M.pick()
   ensure_modules()
-
-  -- Try snacks
-  if config.snacks.enabled then
-    local ok, snacks_mod = pcall(require, "pinwords.snacks")
-    if ok and type(snacks_mod) == "table" and type(snacks_mod.picker) == "function" then
-      snacks_mod.picker()
-      return
-    end
-  end
-
-  -- Try telescope
-  if config.telescope.enabled then
-    local ok, telescope = pcall(require, "telescope")
-    if ok and telescope then
-      pcall(telescope.load_extension, "pinwords")
-      local ext_ok, ext = pcall(function()
-        return telescope.extensions.pinwords.pinwords
-      end)
-      if ext_ok and ext then
-        ext()
-        return
-      end
-    end
-  end
-
-  -- Try fzf-lua
-  if config.fzf_lua.enabled then
-    local ok, fzf_mod = pcall(require, "pinwords.fzf_lua")
-    if ok and type(fzf_mod) == "table" and type(fzf_mod.picker) == "function" then
-      fzf_mod.picker()
-      return
-    end
-  end
-
-  -- Fallback: vim.ui.select
-  local slots = state.get_slots()
-  local keys = vim.tbl_keys(slots)
-  table.sort(keys)
-
-  if #keys == 0 then
-    vim.notify("pinwords: no pinned words", vim.log.levels.INFO)
-    return
-  end
-
-  local items = {}
-  for _, slot in ipairs(keys) do
-    table.insert(items, { slot = slot, raw = slots[slot].raw })
-  end
-
-  vim.ui.select(items, {
-    prompt = "Pinned Words (select to unpin):",
-    format_item = function(item)
-      return string.format("%d: %s", item.slot, item.raw)
-    end,
-  }, function(choice)
-    if choice then
-      M.clear(choice.slot)
-      vim.notify("pinwords: unpinned slot " .. choice.slot, vim.log.levels.INFO)
-    end
-  end)
+  picker.open(config)
 end
 
 ---Jump to the next occurrence of a pinned word.
