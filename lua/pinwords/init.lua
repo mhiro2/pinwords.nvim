@@ -22,18 +22,6 @@ local symbol
 local M = {}
 local AUGROUP_NAME = "PinWords"
 local config_module = require("pinwords.config")
-local COMMAND_NAMES = {
-  "PinWord",
-  "PinWordSymbol",
-  "UnpinWord",
-  "UnpinAllWords",
-  "PinWordList",
-  "PinWordCwordToggle",
-  "PinWordNext",
-  "PinWordPrev",
-  "PinWordGrep",
-  "PinWordLiveGrep",
-}
 
 ---@return nil
 local function ensure_modules()
@@ -452,10 +440,7 @@ function M.teardown()
   flash.clear_all()
 
   matcher.clear_all_globally()
-
-  for _, command_name in ipairs(COMMAND_NAMES) do
-    pcall(vim.api.nvim_del_user_command, command_name)
-  end
+  commands.teardown()
 
   state.teardown()
 end

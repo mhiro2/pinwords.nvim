@@ -3,6 +3,26 @@ local helpers = require("tests.test_helpers")
 
 local T = helpers.create_test_set()
 
+T["all user commands are registered"] = function()
+  local commands = vim.api.nvim_get_commands({ builtin = false })
+  local expected = {
+    "PinWord",
+    "PinWordSymbol",
+    "UnpinWord",
+    "UnpinAllWords",
+    "PinWordList",
+    "PinWordCwordToggle",
+    "PinWordNext",
+    "PinWordPrev",
+    "PinWordGrep",
+    "PinWordLiveGrep",
+  }
+
+  for _, name in ipairs(expected) do
+    MiniTest.expect.equality(commands[name] ~= nil, true)
+  end
+end
+
 T["PinWord with slot argument pins word under cursor"] = function()
   helpers.setup_buffer({ "foo bar baz" })
 

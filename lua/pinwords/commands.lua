@@ -1,4 +1,5 @@
 local M = {}
+local selection = require("pinwords.commands.selection")
 
 ---@class PinwordsCommandOpts
 ---@field args string
@@ -10,20 +11,21 @@ local M = {}
 ---@field count? integer
 ---@field mods? string
 
+---@class PinwordsCommandDefinition
+---@field name string
+---@field nargs integer|string
+---@field desc string
+---@field range? boolean
+---@field accepts_slot? boolean
+---@field handler fun(pinwords: table, opts: PinwordsCommandOpts, slot: integer|nil)
+
 ---@param args string
 ---@param max_slots integer
----@param required boolean
 ---@return integer|nil
-local function parse_slot(args, max_slots, required)
+local function parse_slot(args, max_slots)
   local slot = tonumber(args)
   if not slot then
-    if args ~= "" then
-      vim.notify("pinwords: slot must be a number", vim.log.levels.WARN)
-      return nil
-    end
-    if required then
-      vim.notify("pinwords: slot is required", vim.log.levels.WARN)
-    end
+    vim.notify("pinwords: slot must be a number", vim.log.levels.WARN)
     return nil
   end
 
@@ -36,233 +38,206 @@ local function parse_slot(args, max_slots, required)
 end
 
 ---@param opts PinwordsCommandOpts
----@return boolean
-local function visual_marks_match_range(opts)
-  if type(opts) ~= "table" or opts.range == nil or opts.range == 0 then
-    return false
+---@param max_slots integer
+---@return integer|nil, boolean
+local function resolve_optional_slot(opts, max_slots)
+  if opts.args == "" then
+    return nil, true
   end
 
-  local buf = vim.api.nvim_get_current_buf()
-  local start_pos = vim.fn.getpos("'<")
-  local end_pos = vim.fn.getpos("'>")
-
-  -- getpos() returns: {bufnum, lnum, col, off}
-  local start_buf = start_pos[1]
-  local end_buf = end_pos[1]
-  if (start_buf ~= 0 and start_buf ~= buf) or (end_buf ~= 0 and end_buf ~= buf) then
-    return false
+  local slot = parse_slot(opts.args, max_slots)
+  if not slot then
+    return nil, false
   end
 
-  local start_row = start_pos[2]
-  local start_col = start_pos[3]
-  local end_row = end_pos[2]
-  local end_col = end_pos[3]
-
-  if start_row == 0 or end_row == 0 then
-    return false
-  end
-
-  if start_row > end_row or (start_row == end_row and start_col > end_col) then
-    start_row, end_row = end_row, start_row
-    start_col, end_col = end_col, start_col
-  end
-
-  if type(opts.line1) ~= "number" or type(opts.line2) ~= "number" then
-    return false
-  end
-
-  return start_row == opts.line1 and end_row == opts.line2
+  return slot, true
 end
 
----@return string
-local function get_visual_selection()
-  local buf = vim.api.nvim_get_current_buf()
-  local start_pos = vim.fn.getpos("'<")
-  local end_pos = vim.fn.getpos("'>")
-
-  local start_row = start_pos[2]
-  local start_col = start_pos[3]
-  local end_row = end_pos[2]
-  local end_col = end_pos[3]
-
-  if start_row == 0 or end_row == 0 then
-    return ""
-  end
-
-  if start_row > end_row or (start_row == end_row and start_col > end_col) then
-    start_row, end_row = end_row, start_row
-    start_col, end_col = end_col, start_col
-  end
-
-  local lines = vim.api.nvim_buf_get_lines(buf, start_row - 1, end_row, false)
-  if #lines == 0 then
-    return ""
-  end
-
-  if start_col == 0 or end_col == 0 then
-    return table.concat(lines, "\n")
-  end
-
-  ---@param line string
-  ---@param col integer
-  ---@return integer
-  local function char_end_byte_col(line, col)
-    local line_len = #line
-    if line_len == 0 then
-      return 0
+---@param pinwords table
+---@param opts PinwordsCommandOpts
+---@param slot integer|nil
+local function handle_pin_word(pinwords, opts, slot)
+  -- Treat range as visual selection only when '< and '> marks match the range.
+  -- This avoids accidentally pinning stale visual marks for line-range calls like :1,3PinWord.
+  local raw = selection.resolve(opts)
+  if raw ~= nil then
+    if raw == "" then
+      vim.notify("pinwords: visual selection is empty", vim.log.levels.WARN)
+      return
     end
 
-    local col0 = math.min(math.max(col - 1, 0), line_len - 1)
-    local ok, char_idx
-    if vim.fn.has("nvim-0.11") == 1 then
-      ok, char_idx = pcall(vim.str_utfindex, line, "utf-32", col0)
-    else
-      ok, char_idx = pcall(vim.str_utfindex, line, col0)
-    end
-    if not ok then
-      return line_len
-    end
-    local ok2, byte_idx
-    if vim.fn.has("nvim-0.11") == 1 then
-      ok2, byte_idx = pcall(vim.str_byteindex, line, "utf-32", char_idx + 1)
-    else
-      ok2, byte_idx = pcall(vim.str_byteindex, line, char_idx + 1)
-    end
-    if not ok2 then
-      return line_len
-    end
-    return math.min(byte_idx, line_len)
+    pinwords.set(slot, { raw = raw, whole_word = false })
+    return
   end
 
-  local first_line_len = #lines[1]
-  local start_byte_col = math.min(math.max(start_col - 1, 0), first_line_len)
-  local end_byte_col = char_end_byte_col(lines[#lines], end_col)
-  local selected = vim.api.nvim_buf_get_text(buf, start_row - 1, start_byte_col, end_row - 1, end_byte_col, {})
-  return table.concat(selected, "\n")
+  pinwords.set(slot)
+end
+
+---@param pinwords table
+---@param _opts PinwordsCommandOpts
+---@param slot integer|nil
+local function handle_pin_word_symbol(pinwords, _opts, slot)
+  pinwords.set(slot, { source = "symbol" })
+end
+
+---@param pinwords table
+---@param _opts PinwordsCommandOpts
+---@param slot integer|nil
+local function handle_unpin_word(pinwords, _opts, slot)
+  if slot == nil then
+    pinwords.unpin()
+    return
+  end
+
+  pinwords.clear(slot)
+end
+
+---@param method "clear_all"|"pick"|"cword_toggle"
+---@return fun(pinwords: table)
+local function create_no_arg_handler(method)
+  return function(pinwords)
+    pinwords[method]()
+  end
+end
+
+---@param method "jump_next"|"jump_prev"
+---@return fun(pinwords: table, opts: PinwordsCommandOpts, slot: integer|nil)
+local function create_slot_handler(method)
+  return function(pinwords, _opts, slot)
+    pinwords[method](slot)
+  end
+end
+
+---@param method "grep"|"live_grep"
+---@return fun(pinwords: table, opts: PinwordsCommandOpts, slot: integer|nil)
+local function create_picker_handler(method)
+  return function(pinwords, _opts, slot)
+    pinwords[method]({ slot = slot })
+  end
+end
+
+---@type PinwordsCommandDefinition[]
+local COMMAND_DEFINITIONS = {
+  {
+    name = "PinWord",
+    nargs = "?",
+    range = true,
+    accepts_slot = true,
+    desc = "Pin word (auto allocation). With visual range, pin selection.",
+    handler = handle_pin_word,
+  },
+  {
+    name = "PinWordSymbol",
+    nargs = "?",
+    accepts_slot = true,
+    desc = "Pin symbol at cursor using Treesitter (falls back to cword).",
+    handler = handle_pin_word_symbol,
+  },
+  {
+    name = "UnpinWord",
+    nargs = "?",
+    accepts_slot = true,
+    desc = "Unpin word under cursor, or clear slot.",
+    handler = handle_unpin_word,
+  },
+  {
+    name = "UnpinAllWords",
+    nargs = 0,
+    desc = "Clear all pinned words.",
+    handler = create_no_arg_handler("clear_all"),
+  },
+  {
+    name = "PinWordList",
+    nargs = 0,
+    desc = "List global pinned words in interactive picker.",
+    handler = create_no_arg_handler("pick"),
+  },
+  {
+    name = "PinWordCwordToggle",
+    nargs = 0,
+    desc = "Toggle cursor word highlight (window-local).",
+    handler = create_no_arg_handler("cword_toggle"),
+  },
+  {
+    name = "PinWordNext",
+    nargs = "?",
+    accepts_slot = true,
+    desc = "Jump to next pinned word occurrence.",
+    handler = create_slot_handler("jump_next"),
+  },
+  {
+    name = "PinWordPrev",
+    nargs = "?",
+    accepts_slot = true,
+    desc = "Jump to previous pinned word occurrence.",
+    handler = create_slot_handler("jump_prev"),
+  },
+  {
+    name = "PinWordGrep",
+    nargs = "?",
+    accepts_slot = true,
+    desc = "Grep pinned words across project.",
+    handler = create_picker_handler("grep"),
+  },
+  {
+    name = "PinWordLiveGrep",
+    nargs = "?",
+    accepts_slot = true,
+    desc = "Live grep pinned words across project.",
+    handler = create_picker_handler("live_grep"),
+  },
+}
+
+---@param definition PinwordsCommandDefinition
+---@param max_slots integer
+---@return fun(opts: table)
+local function create_command_handler(definition, max_slots)
+  return function(opts)
+    ---@cast opts PinwordsCommandOpts
+    local slot
+    if definition.accepts_slot then
+      local ok
+      slot, ok = resolve_optional_slot(opts, max_slots)
+      if not ok then
+        return
+      end
+    end
+
+    definition.handler(require("pinwords"), opts, slot)
+  end
+end
+
+---@param definition PinwordsCommandDefinition
+---@return vim.api.keyset.user_command
+local function create_command_options(definition)
+  local opts = {
+    nargs = definition.nargs,
+    force = true,
+    desc = definition.desc,
+  }
+
+  if definition.range then
+    opts.range = true
+  end
+
+  return opts
 end
 
 ---@param max_slots integer
 function M.setup(max_slots)
-  vim.api.nvim_create_user_command("PinWord", function(opts)
-    ---@cast opts PinwordsCommandOpts
-    local slot
-    if opts.args ~= "" then
-      slot = parse_slot(opts.args, max_slots, true)
-      if not slot then
-        return
-      end
-    end
+  for _, definition in ipairs(COMMAND_DEFINITIONS) do
+    vim.api.nvim_create_user_command(
+      definition.name,
+      create_command_handler(definition, max_slots),
+      create_command_options(definition)
+    )
+  end
+end
 
-    -- Treat range as visual selection only when '< and '> marks match the range.
-    -- This avoids accidentally pinning stale visual marks for line-range calls like :1,3PinWord.
-    if visual_marks_match_range(opts) then
-      local raw = get_visual_selection()
-      if raw == "" then
-        vim.notify("pinwords: visual selection is empty", vim.log.levels.WARN)
-        return
-      end
-
-      require("pinwords").set(slot, { raw = raw, whole_word = false })
-      return
-    end
-
-    require("pinwords").set(slot)
-  end, {
-    nargs = "?",
-    range = true,
-    force = true,
-    desc = "Pin word (auto allocation). With visual range, pin selection.",
-  })
-
-  vim.api.nvim_create_user_command("PinWordSymbol", function(opts)
-    ---@cast opts PinwordsCommandOpts
-    local slot
-    if opts.args ~= "" then
-      slot = parse_slot(opts.args, max_slots, true)
-      if not slot then
-        return
-      end
-    end
-    require("pinwords").set(slot, { source = "symbol" })
-  end, {
-    nargs = "?",
-    force = true,
-    desc = "Pin symbol at cursor using Treesitter (falls back to cword).",
-  })
-
-  vim.api.nvim_create_user_command("UnpinWord", function(opts)
-    ---@cast opts PinwordsCommandOpts
-    if opts.args == "" then
-      require("pinwords").unpin()
-      return
-    end
-
-    local slot = parse_slot(opts.args, max_slots, true)
-    if not slot then
-      return
-    end
-    require("pinwords").clear(slot)
-  end, { nargs = "?", force = true, desc = "Unpin word under cursor, or clear slot." })
-
-  vim.api.nvim_create_user_command("UnpinAllWords", function()
-    require("pinwords").clear_all()
-  end, { nargs = 0, force = true, desc = "Clear all pinned words." })
-
-  vim.api.nvim_create_user_command("PinWordList", function()
-    require("pinwords").pick()
-  end, { nargs = 0, force = true, desc = "List global pinned words in interactive picker." })
-
-  vim.api.nvim_create_user_command("PinWordCwordToggle", function()
-    require("pinwords").cword_toggle()
-  end, { nargs = 0, force = true, desc = "Toggle cursor word highlight (window-local)." })
-
-  vim.api.nvim_create_user_command("PinWordNext", function(opts)
-    ---@cast opts PinwordsCommandOpts
-    local slot
-    if opts.args ~= "" then
-      slot = parse_slot(opts.args, max_slots, true)
-      if not slot then
-        return
-      end
-    end
-    require("pinwords").jump_next(slot)
-  end, { nargs = "?", force = true, desc = "Jump to next pinned word occurrence." })
-
-  vim.api.nvim_create_user_command("PinWordPrev", function(opts)
-    ---@cast opts PinwordsCommandOpts
-    local slot
-    if opts.args ~= "" then
-      slot = parse_slot(opts.args, max_slots, true)
-      if not slot then
-        return
-      end
-    end
-    require("pinwords").jump_prev(slot)
-  end, { nargs = "?", force = true, desc = "Jump to previous pinned word occurrence." })
-
-  vim.api.nvim_create_user_command("PinWordGrep", function(opts)
-    ---@cast opts PinwordsCommandOpts
-    local slot
-    if opts.args ~= "" then
-      slot = parse_slot(opts.args, max_slots, true)
-      if not slot then
-        return
-      end
-    end
-    require("pinwords").grep({ slot = slot })
-  end, { nargs = "?", force = true, desc = "Grep pinned words across project." })
-
-  vim.api.nvim_create_user_command("PinWordLiveGrep", function(opts)
-    ---@cast opts PinwordsCommandOpts
-    local slot
-    if opts.args ~= "" then
-      slot = parse_slot(opts.args, max_slots, true)
-      if not slot then
-        return
-      end
-    end
-    require("pinwords").live_grep({ slot = slot })
-  end, { nargs = "?", force = true, desc = "Live grep pinned words across project." })
+function M.teardown()
+  for _, definition in ipairs(COMMAND_DEFINITIONS) do
+    pcall(vim.api.nvim_del_user_command, definition.name)
+  end
 end
 
 return M
