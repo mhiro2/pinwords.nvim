@@ -8,7 +8,7 @@ if not has_fzf_lua then
   return false
 end
 
-local pinwords = require("pinwords")
+local picker = require("pinwords.picker")
 
 ---@param selected string
 ---@param slot_map table<string, integer>
@@ -25,22 +25,19 @@ end
 local function pinwords_picker(opts)
   opts = opts or {}
 
-  local slots = pinwords.list()
-  local keys = vim.tbl_keys(slots)
-  table.sort(keys)
+  local picker_items = picker.list_items()
 
-  if #keys == 0 then
-    vim.notify("pinwords: no pinned words", vim.log.levels.WARN)
+  if #picker_items == 0 then
+    picker.notify_empty(vim.log.levels.WARN)
     return
   end
 
   local items = {}
   local slot_map = {}
-  for _, slot in ipairs(keys) do
-    local entry = slots[slot]
-    local display = string.format("%d: %s", slot, entry.raw)
+  for _, item in ipairs(picker_items) do
+    local display = picker.format_item(item)
     table.insert(items, display)
-    slot_map[display] = slot
+    slot_map[display] = item.slot
   end
 
   fzf_lua.fzf_exec(
@@ -52,27 +49,24 @@ local function pinwords_picker(opts)
           if not selected or #selected == 0 then
             return
           end
+          local slots = {}
           for _, sel in ipairs(selected) do
             local slot = parse_slot(sel, slot_map)
             if slot then
-              pinwords.clear(slot)
+              slots[#slots + 1] = slot
             end
           end
-          vim.notify("pinwords: unpinned " .. #selected .. " slot(s)", vim.log.levels.INFO)
+          picker.unpin_slots(slots)
         end,
         ["ctrl-d"] = function(selected)
           if not selected or #selected == 0 then
             return
           end
           local slot = parse_slot(selected[1], slot_map)
-          if slot then
-            pinwords.clear(slot)
-            vim.notify("pinwords: unpinned slot " .. slot, vim.log.levels.INFO)
-          end
+          picker.unpin_slot(slot)
         end,
         ["ctrl-x"] = function()
-          pinwords.clear_all()
-          vim.notify("pinwords: cleared all pins", vim.log.levels.INFO)
+          picker.clear_all()
         end,
       },
     }, opts)
