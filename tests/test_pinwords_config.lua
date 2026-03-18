@@ -299,7 +299,7 @@ T["setup validates flash config values"] = function()
     local ok = pcall(pinwords.setup, {
       flash = {
         enabled = "yes",
-        timeout_ms = 0,
+        timeout_ms = -1,
         hl_group = 1,
         priority = 1.5,
       },
@@ -314,6 +314,23 @@ T["setup validates flash config values"] = function()
     end
     MiniTest.expect.equality(has_warning, true)
   end)
+end
+
+T["setup accepts flash timeout_ms zero"] = function()
+  local pinwords = require("pinwords")
+
+  helpers.with_notify_override(function(notified)
+    local ok = pcall(pinwords.setup, {
+      flash = {
+        timeout_ms = 0,
+      },
+    })
+
+    MiniTest.expect.equality(ok, true)
+    MiniTest.expect.equality(#notified, 0)
+  end)
+
+  MiniTest.expect.equality(pinwords.get_config().flash.timeout_ms, 0)
 end
 
 T["setup with non-table opts does not crash"] = function()

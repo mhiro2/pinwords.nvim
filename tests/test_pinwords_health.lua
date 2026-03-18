@@ -113,7 +113,7 @@ end
 T["health.check reports invalid config values"] = function()
   local cfg = valid_config()
   cfg.slots = 0
-  cfg.flash.timeout_ms = 0
+  cfg.flash.timeout_ms = -1
   cfg.auto_allocation.strategy = "invalid"
 
   local reporter, calls = new_reporter()
@@ -129,7 +129,7 @@ T["health.check reports invalid config values"] = function()
 
   MiniTest.expect.equality(has_message(calls.error, "slots must be a positive integer"), true)
   MiniTest.expect.equality(has_message(calls.error, "auto_allocation.strategy must be one of"), true)
-  MiniTest.expect.equality(has_message(calls.error, "flash.timeout_ms must be a positive integer"), true)
+  MiniTest.expect.equality(has_message(calls.error, "flash.timeout_ms must be a non-negative integer"), true)
 end
 
 return T

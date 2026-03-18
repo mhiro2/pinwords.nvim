@@ -109,4 +109,18 @@ T["flash.enabled=false disables feedback"] = function()
   MiniTest.expect.equality(helpers.find_match(FLASH_GROUP), nil)
 end
 
+T["flash timeout_ms=0 clears immediately"] = function()
+  helpers.setup_buffer({ "foo bar", "baz" })
+
+  local pinwords = require("pinwords")
+  setup_flash(pinwords, { timeout_ms = 0 })
+
+  pinwords.set(1)
+
+  local cleared = vim.wait(100, function()
+    return helpers.find_match(FLASH_GROUP) == nil
+  end, 10)
+  MiniTest.expect.equality(cleared, true)
+end
+
 return T

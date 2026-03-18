@@ -347,16 +347,85 @@ end
 -- Fallback integration
 -- ==========================================================================
 
-T["fallback grep uses vim.fn.vimgrep and preserves slot semantics"] = function()
+T["fallback grep prefers ripgrep quickfix and preserves slot semantics"] = function()
   local slots = {
     [1] = slot_entry(1, "foo/bar", "\\V\\cfoo/bar"),
   }
 
   local captured = {}
+  local orig_executable = vim.fn.executable
+  local orig_system = vim.system
+  local orig_setqflist = vim.fn.setqflist
+  local orig_nvim_command = vim.api.nvim_command
+
+  vim.fn.executable = function(bin)
+    MiniTest.expect.equality(bin, "rg")
+    return 1
+  end
+  vim.system = function(argv, opts)
+    captured.argv = argv
+    captured.opts = opts
+    return {
+      wait = function()
+        return {
+          code = 0,
+          stdout = "lua/pinwords/init.lua:1:1:matched line\n",
+          stderr = "",
+        }
+      end,
+    }
+  end
+  vim.fn.setqflist = function(_list, action, what)
+    captured.action = action
+    captured.what = what
+  end
+  vim.api.nvim_command = function(cmd)
+    captured.command = cmd
+  end
+
+  local ok, err = pcall(function()
+    grep._fallback_grep(slots, nil)
+  end)
+
+  vim.fn.executable = orig_executable
+  vim.system = orig_system
+  vim.fn.setqflist = orig_setqflist
+  vim.api.nvim_command = orig_nvim_command
+
+  MiniTest.expect.equality(ok, true)
+  MiniTest.expect.equality(err, nil)
+  MiniTest.expect.equality(captured.argv, {
+    "rg",
+    "--vimgrep",
+    "--color=never",
+    "--no-heading",
+    "(?i:foo/bar)",
+  })
+  MiniTest.expect.equality(captured.opts.text, true)
+  MiniTest.expect.equality(captured.action, " ")
+  MiniTest.expect.equality(captured.what.title, "pinwords grep")
+  MiniTest.expect.equality(captured.what.items[1].filename, "lua/pinwords/init.lua")
+  MiniTest.expect.equality(captured.what.items[1].lnum, 1)
+  MiniTest.expect.equality(captured.what.items[1].col, 1)
+  MiniTest.expect.equality(captured.what.items[1].text, "matched line")
+  MiniTest.expect.equality(captured.command, "copen")
+end
+
+T["fallback grep falls back to vimgrep when ripgrep is unavailable"] = function()
+  local slots = {
+    [1] = slot_entry(1, "foo/bar", "\\V\\cfoo/bar"),
+  }
+
+  local captured = {}
+  local orig_executable = vim.fn.executable
   local orig_vimgrep = vim.fn.vimgrep
   local orig_getqflist = vim.fn.getqflist
   local orig_nvim_command = vim.api.nvim_command
 
+  vim.fn.executable = function(bin)
+    MiniTest.expect.equality(bin, "rg")
+    return 0
+  end
   vim.fn.vimgrep = function(pattern, files, flags)
     captured.pattern = pattern
     captured.files = files
@@ -374,6 +443,7 @@ T["fallback grep uses vim.fn.vimgrep and preserves slot semantics"] = function()
     grep._fallback_grep(slots, nil)
   end)
 
+  vim.fn.executable = orig_executable
   vim.fn.vimgrep = orig_vimgrep
   vim.fn.getqflist = orig_getqflist
   vim.api.nvim_command = orig_nvim_command
@@ -386,14 +456,26 @@ T["fallback grep uses vim.fn.vimgrep and preserves slot semantics"] = function()
   MiniTest.expect.equality(captured.command, "copen")
 end
 
-T["fallback grep treats E480 no-match as info notification"] = function()
+T["fallback grep treats ripgrep no-match as info notification"] = function()
   local slots = {
     [1] = slot_entry(1, "notfound", "\\V\\cnotfound"),
   }
 
-  local orig_vimgrep = vim.fn.vimgrep
-  vim.fn.vimgrep = function(_pattern, _files, _flags)
-    error("Vim:E480: No match: notfound")
+  local orig_executable = vim.fn.executable
+  local orig_system = vim.system
+  vim.fn.executable = function()
+    return 1
+  end
+  vim.system = function(_argv, _opts)
+    return {
+      wait = function()
+        return {
+          code = 1,
+          stdout = "",
+          stderr = "",
+        }
+      end,
+    }
   end
 
   local ok, err = pcall(function()
@@ -404,7 +486,9 @@ T["fallback grep treats E480 no-match as info notification"] = function()
       MiniTest.expect.equality(notified[1].level, vim.log.levels.INFO)
     end)
   end)
-  vim.fn.vimgrep = orig_vimgrep
+
+  vim.fn.executable = orig_executable
+  vim.system = orig_system
 
   MiniTest.expect.equality(ok, true)
   MiniTest.expect.equality(err, nil)

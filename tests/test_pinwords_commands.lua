@@ -102,6 +102,26 @@ T["UnpinWord with slot clears specific slot"] = function()
   MiniTest.expect.equality(slots[2].raw, "bar")
 end
 
+T["UnpinWord warns when current word matches multiple slots"] = function()
+  helpers.setup_buffer({ "foo bar baz" })
+
+  local pinwords = require("pinwords")
+  pinwords.set(1, { raw = "foo", whole_word = false })
+  pinwords.set(2, { raw = "foo", case_sensitive = true })
+
+  helpers.with_notify_override(function(notified)
+    vim.cmd("UnpinWord")
+
+    MiniTest.expect.equality(#notified > 0, true)
+    MiniTest.expect.equality(notified[1].msg:find("multiple pinned slots match current word", 1, true) ~= nil, true)
+    MiniTest.expect.equality(notified[1].level, vim.log.levels.WARN)
+  end)
+
+  local slots = pinwords.list()
+  MiniTest.expect.equality(slots[1] ~= nil, true)
+  MiniTest.expect.equality(slots[2] ~= nil, true)
+end
+
 T["UnpinAllWords clears all slots"] = function()
   helpers.setup_buffer({ "foo bar baz" })
 

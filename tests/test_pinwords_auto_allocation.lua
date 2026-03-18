@@ -142,4 +142,19 @@ T["auto set with toggle_same false does not toggle existing word"] = function()
   MiniTest.expect.equality(after >= before, true)
 end
 
+T["auto set with toggle_same true keeps same raw with different semantics"] = function()
+  local pinwords = require("pinwords")
+  pinwords.setup({ auto_allocation = { toggle_same = true } })
+
+  helpers.setup_buffer({ "foo bar" })
+
+  pinwords.set(nil, { raw = "foo", case_sensitive = true })
+  pinwords.set(nil, { raw = "foo", case_sensitive = false })
+
+  local slots = pinwords.list()
+  MiniTest.expect.equality(slots[1] ~= nil, true)
+  MiniTest.expect.equality(slots[2] ~= nil, true)
+  MiniTest.expect.equality(slots[1].pattern ~= slots[2].pattern, true)
+end
+
 return T

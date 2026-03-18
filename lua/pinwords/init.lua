@@ -287,7 +287,7 @@ function M.set(slot, opts)
   end
 
   if config.auto_allocation.toggle_same then
-    local existing = state.find_slot_by_raw_or_pattern_pair(raw, pattern_text)
+    local existing = state.find_slot_by_raw_and_pattern(raw, pattern_text)
     if existing then
       M.clear(existing)
       return
@@ -353,9 +353,20 @@ function M.unpin()
   end
 
   local pattern_text = build_pattern(raw)
-  local slot = state.find_slot_by_raw_or_pattern_pair(raw, pattern_text)
+  local slot = state.find_slot_by_raw_and_pattern(raw, pattern_text)
   if slot then
     M.clear(slot)
+    return
+  end
+
+  local raw_slots = state.find_slots_by_raw(raw)
+  if #raw_slots == 1 then
+    M.clear(raw_slots[1])
+    return
+  end
+
+  if #raw_slots > 1 then
+    vim.notify("pinwords: multiple pinned slots match current word; specify a slot", vim.log.levels.WARN)
   end
 end
 

@@ -155,6 +155,48 @@ T["cword update uses target window context"] = function()
   pinwords.cword_toggle()
 end
 
+T["cword debounce updates each window independently"] = function()
+  helpers.setup_buffer({ "foo bar" })
+
+  local pinwords = require("pinwords")
+  local win1 = vim.api.nvim_get_current_win()
+  pinwords.cword_toggle()
+
+  helpers.open_vsplit()
+  local win2 = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_cursor(win2, { 1, 4 })
+  pinwords.cword_toggle()
+
+  vim.api.nvim_set_current_win(win1)
+  vim.api.nvim_win_set_cursor(win1, { 1, 4 })
+  vim.api.nvim_exec_autocmds("CursorMoved", { modeline = false })
+
+  vim.api.nvim_set_current_win(win2)
+  vim.api.nvim_win_set_cursor(win2, { 1, 0 })
+  vim.api.nvim_exec_autocmds("CursorMoved", { modeline = false })
+
+  local updated = vim.wait(200, function()
+    local match1 = vim.api.nvim_win_call(win1, function()
+      return helpers.find_match("PinWordCword")
+    end)
+    local match2 = vim.api.nvim_win_call(win2, function()
+      return helpers.find_match("PinWordCword")
+    end)
+
+    return match1 ~= nil
+      and match1.pattern == "\\V\\c\\<bar\\>"
+      and match2 ~= nil
+      and match2.pattern == "\\V\\c\\<foo\\>"
+  end, 10)
+
+  MiniTest.expect.equality(updated, true)
+
+  vim.api.nvim_set_current_win(win1)
+  pinwords.cword_toggle()
+  vim.api.nvim_set_current_win(win2)
+  pinwords.cword_toggle()
+end
+
 T["cword state cleanup after window close"] = function()
   helpers.setup_buffer({ "foo bar", "baz" })
 

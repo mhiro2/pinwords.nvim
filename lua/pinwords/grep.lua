@@ -207,11 +207,89 @@ function M.build_vim_pattern(slots, slot)
 end
 
 ---Run fallback grep using Vim's vimgrep.
+---@param title string
+---@param items vim.quickfix.entry[]
+---@return nil
+local function open_quickfix(title, items)
+  vim.fn.setqflist({}, " ", {
+    title = title,
+    items = items,
+  })
+  vim.api.nvim_command("copen")
+end
+
+---@param stdout string
+---@return vim.quickfix.entry[]
+local function parse_rg_vimgrep(stdout)
+  local items = {}
+
+  for line in stdout:gmatch("[^\r\n]+") do
+    local filename, lnum, col, text = line:match("^(.+):(%d+):(%d+):(.*)$")
+    if filename then
+      items[#items + 1] = {
+        filename = filename,
+        lnum = tonumber(lnum),
+        col = tonumber(col),
+        text = text,
+      }
+    end
+  end
+
+  return items
+end
+
+---@param rg_pattern string
+---@return boolean
+local function try_rg_fallback(rg_pattern)
+  if vim.fn.executable("rg") ~= 1 or type(vim.system) ~= "function" then
+    return false
+  end
+
+  local result = vim
+    .system({
+      "rg",
+      "--vimgrep",
+      "--color=never",
+      "--no-heading",
+      rg_pattern,
+    }, { text = true })
+    :wait()
+
+  if result.code == 1 then
+    vim.notify("pinwords: grep found no matches", vim.log.levels.INFO)
+    return true
+  end
+
+  if result.code ~= 0 then
+    local msg = vim.trim(result.stderr or "")
+    if msg == "" then
+      msg = "rg exited with code " .. result.code
+    end
+    vim.notify("pinwords: grep failed: " .. msg, vim.log.levels.WARN)
+    return true
+  end
+
+  local items = parse_rg_vimgrep(result.stdout or "")
+  if #items == 0 then
+    vim.notify("pinwords: grep found no matches", vim.log.levels.INFO)
+    return true
+  end
+
+  open_quickfix("pinwords grep", items)
+  return true
+end
+
+---Run fallback grep using ripgrep when available, then Vim's vimgrep.
 ---@param slots table<integer, PinwordsSlot>
 ---@param slot? integer
 function M._fallback_grep(slots, slot)
   local entries = resolve_search_entries("grep", slots, slot)
   if not entries then
+    return
+  end
+
+  local rg_pattern = build_rg_pattern_from_entries(entries)
+  if rg_pattern and try_rg_fallback(rg_pattern) then
     return
   end
 

@@ -84,8 +84,14 @@ end
 ---@param raw string
 ---@param pattern_text string
 ---@return integer|nil
-function M.find_slot_by_raw_or_pattern_pair(raw, pattern_text)
-  return global_state.find_slot_by_raw_or_pattern_pair(raw, pattern_text)
+function M.find_slot_by_raw_and_pattern(raw, pattern_text)
+  return global_state.find_slot_by_raw_and_pattern(raw, pattern_text)
+end
+
+---@param raw string
+---@return integer[]
+function M.find_slots_by_raw(raw)
+  return global_state.find_slots_by_raw(raw)
 end
 
 ---@param strategy string

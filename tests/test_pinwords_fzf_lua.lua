@@ -150,6 +150,7 @@ T["fzf-lua picker handles empty state"] = function()
 
       MiniTest.expect.equality(called, false)
       MiniTest.expect.equality(notified[1].msg, "pinwords: no pinned words")
+      MiniTest.expect.equality(notified[1].level, vim.log.levels.INFO)
     end)
   end)
 end

@@ -96,7 +96,7 @@ require("pinwords").setup({
 | --- | --- | --- |
 | `strategy` | `first_empty`, `cycle`, `lru` | Slot selection policy (`lru` replaces least-recently used when full). |
 | `on_full` | `replace_oldest`, `replace_last`, `no_op` | What to do when no empty slot is found (applies to `first_empty`/`cycle`). |
-| `toggle_same` | `true`, `false` | If the same pattern is already pinned, unpin it instead of adding a new slot. |
+| `toggle_same` | `true`, `false` | If the same raw text with the same match semantics is already pinned, unpin it instead of adding a new slot. |
 
 #### Custom Highlight Colors
 
@@ -134,7 +134,7 @@ require("pinwords").setup({
 | Option | Type | Default | Behavior |
 | --- | --- | --- | --- |
 | `enabled` | boolean | `true` | Enables/disables flash feedback. |
-| `timeout_ms` | integer | `120` | Flash duration in milliseconds. |
+| `timeout_ms` | integer | `120` | Flash duration in milliseconds. `0` clears on the next event loop tick. |
 | `hl_group` | string | `PinWordFlash` | Highlight group used for flash. |
 | `priority` | integer | `250` | Match priority for flash highlighting. |
 
@@ -198,7 +198,7 @@ See the [Picker Integrations](#-picker-integrations) section for usage details.
 | `:PinWord {slot}`       | Pin word under cursor (visual mode uses selection). |
 | `:PinWordSymbol`        | Pin symbol at cursor using Treesitter (auto allocation). |
 | `:PinWordSymbol {slot}` | Pin symbol at cursor to specific slot. Falls back to cword when no parser or no symbol found. |
-| `:UnpinWord`            | Unpin word under cursor |
+| `:UnpinWord`            | Unpin word under cursor (warns when multiple slots share the same raw text) |
 | `:UnpinWord {slot}`     | Clear slot            |
 | `:UnpinAllWords`        | Clear all             |
 | `:PinWordList`          | Interactive picker for global pinned words (falls back to `vim.ui.select`) |
@@ -366,7 +366,7 @@ No additional configuration is needed — if you have a picker enabled for `:Pin
 
 > [!NOTE]
 > Grep backends are line-oriented, so multi-line pinned words are skipped.
-> When no picker backend is available, both commands fall back to one-shot quickfix grep via `vimgrep`.
+> When no picker backend is available, both commands fall back to one-shot quickfix grep via `rg` when available, then `vimgrep`.
 ## 🎨 Highlight Groups
 
 ```vim
