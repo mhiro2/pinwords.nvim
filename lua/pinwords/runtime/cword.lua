@@ -18,11 +18,12 @@ local config = {
 ---@type table<integer, boolean>
 local enabled_wins = {}
 
----@type uv.uv_timer_t|nil
-local timer
+---@type table<integer, uv.uv_timer_t>
+local timers = {}
 
+---@param timer uv.uv_timer_t|nil
 ---@return nil
-local function stop_timer()
+local function stop_timer(timer)
   if not timer then
     return
   end
@@ -33,7 +34,20 @@ local function stop_timer()
   pcall(function()
     timer:close()
   end)
-  timer = nil
+end
+
+---@param win integer
+---@return nil
+local function clear_timer(win)
+  stop_timer(timers[win])
+  timers[win] = nil
+end
+
+---@return nil
+local function clear_all_timers()
+  for win in pairs(timers) do
+    clear_timer(win)
+  end
 end
 
 ---@param win integer
@@ -51,6 +65,8 @@ end
 ---@param win integer
 ---@return nil
 local function clear_window(win)
+  clear_timer(win)
+
   local win_state = state.get_win_state(win)
   local cword_state = win_state.cword or { enabled = false }
 
@@ -132,6 +148,7 @@ function M.cleanup_stale_windows()
   for win in pairs(enabled_wins) do
     if type(win) ~= "number" or not vim.api.nvim_win_is_valid(win) then
       enabled_wins[win] = nil
+      clear_timer(win)
     end
   end
 end
@@ -155,22 +172,31 @@ function M.handle_cursor_moved(win)
     return
   end
 
-  if timer then
-    timer:stop()
+  clear_timer(win)
+
+  local ok, timer = pcall(vim.uv.new_timer)
+  if not ok or not timer then
+    return
   end
-  if not timer then
-    timer = vim.uv.new_timer()
-  end
+  timers[win] = timer
 
   timer:start(
     config.debounce_ms,
     0,
     vim.schedule_wrap(function()
-      -- Use captured win, not current win at timer fire time.
-      if not M.is_enabled(win) then
+      if timers[win] ~= timer then
+        stop_timer(timer)
         return
       end
+
+      timers[win] = nil
+      if not M.is_enabled(win) then
+        stop_timer(timer)
+        return
+      end
+
       update_for_window(win)
+      stop_timer(timer)
     end)
   )
 end
@@ -202,11 +228,8 @@ end
 
 ---@return nil
 function M.flush_current()
-  if timer then
-    timer:stop()
-  end
-
   local win = vim.api.nvim_get_current_win()
+  clear_timer(win)
   if M.is_enabled(win) then
     update_for_window(win)
   end
@@ -216,6 +239,7 @@ end
 ---@return nil
 function M.handle_win_closed(win)
   enabled_wins[win] = nil
+  clear_timer(win)
 end
 
 ---@return nil
@@ -229,7 +253,7 @@ end
 
 ---@return nil
 function M.teardown()
-  stop_timer()
+  clear_all_timers()
   M.clear_all()
   enabled_wins = {}
 end
