@@ -567,7 +567,7 @@ T["init_global_state fixes invalid slots table internally"] = function()
   MiniTest.expect.equality(next(slots), nil)
 end
 
-T["find_slot_by_raw_or_pattern_pair matches both raw and pattern"] = function()
+T["find_slot_by_raw_and_pattern matches exact entry"] = function()
   helpers.setup_buffer({ "test" })
 
   local state = require("pinwords.state")
@@ -579,11 +579,11 @@ T["find_slot_by_raw_or_pattern_pair matches both raw and pattern"] = function()
     hl_group = "PinWord1",
   })
 
-  local slot = state.find_slot_by_raw_or_pattern_pair("foo", "\\V\\c\\<foo\\>")
+  local slot = state.find_slot_by_raw_and_pattern("foo", "\\V\\c\\<foo\\>")
   MiniTest.expect.equality(slot, 1)
 end
 
-T["find_slot_by_raw_or_pattern_pair matches by raw alone"] = function()
+T["find_slot_by_raw_and_pattern rejects raw-only match"] = function()
   helpers.setup_buffer({ "test" })
 
   local state = require("pinwords.state")
@@ -595,12 +595,11 @@ T["find_slot_by_raw_or_pattern_pair matches by raw alone"] = function()
     hl_group = "PinWord1",
   })
 
-  -- Same raw but different pattern (case-insensitive vs case-sensitive)
-  local slot = state.find_slot_by_raw_or_pattern_pair("foo", "\\V\\c\\<foo\\>")
-  MiniTest.expect.equality(slot, 1)
+  local slot = state.find_slot_by_raw_and_pattern("foo", "\\V\\c\\<foo\\>")
+  MiniTest.expect.equality(slot, nil)
 end
 
-T["find_slot_by_raw_or_pattern_pair matches by pattern alone"] = function()
+T["find_slot_by_raw_and_pattern rejects pattern-only match"] = function()
   helpers.setup_buffer({ "test" })
 
   local state = require("pinwords.state")
@@ -612,12 +611,11 @@ T["find_slot_by_raw_or_pattern_pair matches by pattern alone"] = function()
     hl_group = "PinWord1",
   })
 
-  -- Different raw but same pattern
-  local slot = state.find_slot_by_raw_or_pattern_pair("bar", "\\V\\c\\<foo\\>")
-  MiniTest.expect.equality(slot, 1)
+  local slot = state.find_slot_by_raw_and_pattern("bar", "\\V\\c\\<foo\\>")
+  MiniTest.expect.equality(slot, nil)
 end
 
-T["find_slot_by_raw_or_pattern_pair does not cross-match entries"] = function()
+T["find_slot_by_raw_and_pattern does not cross-match entries"] = function()
   helpers.setup_buffer({ "test" })
 
   local state = require("pinwords.state")
@@ -634,9 +632,34 @@ T["find_slot_by_raw_or_pattern_pair does not cross-match entries"] = function()
     hl_group = "PinWord2",
   })
 
-  -- Neither raw nor pattern matches any single entry
-  local slot = state.find_slot_by_raw_or_pattern_pair("baz", "\\V\\c\\<qux\\>")
+  local slot = state.find_slot_by_raw_and_pattern("baz", "\\V\\c\\<qux\\>")
   MiniTest.expect.equality(slot, nil)
+end
+
+T["find_slots_by_raw returns matching slots in order"] = function()
+  helpers.setup_buffer({ "test" })
+
+  local state = require("pinwords.state")
+  state.clear_all()
+
+  state.set_slot(3, {
+    raw = "foo",
+    pattern = "\\V\\cfoo",
+    hl_group = "PinWord3",
+  })
+  state.set_slot(1, {
+    raw = "foo",
+    pattern = "\\V\\Cfoo",
+    hl_group = "PinWord1",
+  })
+  state.set_slot(2, {
+    raw = "bar",
+    pattern = "\\V\\cbar",
+    hl_group = "PinWord2",
+  })
+
+  local slots = state.find_slots_by_raw("foo")
+  MiniTest.expect.equality(slots, { 1, 3 })
 end
 
 T["set_win_state does not error on invalid window"] = function()
