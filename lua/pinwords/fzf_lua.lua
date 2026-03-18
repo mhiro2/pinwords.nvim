@@ -28,7 +28,7 @@ local function pinwords_picker(opts)
   local picker_items = picker.list_items()
 
   if #picker_items == 0 then
-    picker.notify_empty(vim.log.levels.WARN)
+    picker.notify_empty(vim.log.levels.INFO)
     return
   end
 

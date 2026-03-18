@@ -63,7 +63,8 @@ AUTO ALLOCATION                                          *pinwords-auto-allocati
     no_op           Do nothing when full.
 
   toggle_same:
-    true   If the same pattern exists, unpin it (toggle off).
+    true   If the same raw text with the same match semantics exists,
+           unpin it (toggle off).
     false  Always allocate a new slot (or replace based on policy).
 
   Notes ~
@@ -79,7 +80,7 @@ FLASH FEEDBACK                                          *pinwords-flash-feedback
     false  Disable visual feedback.
 
   timeout_ms:
-    Flash duration in milliseconds.
+    Flash duration in milliseconds. 0 clears on the next event loop tick.
 
   hl_group:
     Highlight group used for flash (default: PinWordFlash).
@@ -95,6 +96,7 @@ COMMANDS                                                       *pinwords-command
   :PinWordSymbol {slot}  Pin symbol at cursor to specific slot.
                          Falls back to cword when no parser or no symbol found.
   :UnpinWord             Unpin word under cursor.
+                         Warns when multiple slots share the same raw text.
   :UnpinWord {slot}      Clear slot.
   :UnpinAllWords         Clear all pinned words.
   :PinWordList           Interactive picker for global pinned words.
@@ -262,7 +264,7 @@ GREP INTEGRATION                                              *pinwords-grep*
     snacks -> telescope -> fzf-lua -> vimgrep (quickfix) fallback.
     Grep backends are line-oriented, so multi-line pinned words are skipped.
     When no picker backend is available, both commands fall back to one-shot
-    quickfix grep via vimgrep.
+    quickfix grep via rg when available, otherwise via vimgrep.
 
   Example Key Mappings: ~
 >lua

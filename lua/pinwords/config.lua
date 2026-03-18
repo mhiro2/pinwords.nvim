@@ -140,6 +140,12 @@ local function is_positive_integer(value)
   return is_integer(value) and value >= 1
 end
 
+---@param value any
+---@return boolean
+local function is_non_negative_integer(value)
+  return is_integer(value) and value >= 0
+end
+
 ---@param errors string[]
 ---@param colors any
 ---@return nil
@@ -276,8 +282,8 @@ function M.sanitize(opts, warn)
     end, default_config.flash.enabled, "flash.enabled must be boolean; fallback to default", warn)
 
     cfg.flash.timeout_ms = validate_field(cfg.flash.timeout_ms, function(v)
-      return is_positive_integer(v)
-    end, default_config.flash.timeout_ms, "flash.timeout_ms must be a positive integer; fallback to default", warn)
+      return is_non_negative_integer(v)
+    end, default_config.flash.timeout_ms, "flash.timeout_ms must be a non-negative integer; fallback to default", warn)
 
     cfg.flash.hl_group = validate_field(cfg.flash.hl_group, function(v)
       return type(v) == "string" and v ~= ""
@@ -351,8 +357,8 @@ function M.validate(cfg)
     if type(cfg.flash.enabled) ~= "boolean" then
       add_error(errors, "flash.enabled must be boolean")
     end
-    if not is_positive_integer(cfg.flash.timeout_ms) then
-      add_error(errors, "flash.timeout_ms must be a positive integer")
+    if not is_non_negative_integer(cfg.flash.timeout_ms) then
+      add_error(errors, "flash.timeout_ms must be a non-negative integer")
     end
     if type(cfg.flash.hl_group) ~= "string" or cfg.flash.hl_group == "" then
       add_error(errors, "flash.hl_group must be a non-empty string")
