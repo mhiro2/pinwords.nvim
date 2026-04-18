@@ -1,7 +1,5 @@
 local M = {}
 
-local HAS_UTF32_INDEX = vim.fn.has("nvim-0.11") == 1
-
 ---@param start_row integer
 ---@param start_col integer
 ---@param end_row integer
@@ -26,21 +24,13 @@ local function char_end_byte_col(line, col)
 
   local col0 = math.min(math.max(col - 1, 0), line_len - 1)
   local ok, char_idx
-  if HAS_UTF32_INDEX then
-    ok, char_idx = pcall(vim.str_utfindex, line, "utf-32", col0)
-  else
-    ok, char_idx = pcall(vim.str_utfindex, line, col0)
-  end
+  ok, char_idx = pcall(vim.str_utfindex, line, "utf-32", col0)
   if not ok then
     return line_len
   end
 
   local ok_byte, byte_idx
-  if HAS_UTF32_INDEX then
-    ok_byte, byte_idx = pcall(vim.str_byteindex, line, "utf-32", char_idx + 1)
-  else
-    ok_byte, byte_idx = pcall(vim.str_byteindex, line, char_idx + 1)
-  end
+  ok_byte, byte_idx = pcall(vim.str_byteindex, line, "utf-32", char_idx + 1)
   if not ok_byte then
     return line_len
   end

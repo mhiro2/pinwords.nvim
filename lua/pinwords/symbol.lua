@@ -40,8 +40,7 @@ end
 ---@param bufnr integer
 ---@return boolean
 function M.has_parser(bufnr)
-  local ok = pcall(vim.treesitter.get_parser, bufnr)
-  return ok
+  return vim.treesitter.get_parser(bufnr) ~= nil
 end
 
 --- Get the symbol name at the cursor position using Treesitter.

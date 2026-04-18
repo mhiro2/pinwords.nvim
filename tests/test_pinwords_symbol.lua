@@ -72,13 +72,10 @@ end
 
 T["has_parser returns false when no parser available"] = function()
   helpers.setup_buffer({ "hello world" })
-  -- Plain text buffer has no parser
   local symbol = require("pinwords.symbol")
-  -- Use a filetype with no parser
-  vim.bo.filetype = "pinwords_test_no_parser"
   local originals = mock_treesitter({
     get_parser = function()
-      error("no parser")
+      return nil
     end,
   })
   local result = symbol.has_parser(vim.api.nvim_get_current_buf())
@@ -108,7 +105,7 @@ T["get_symbol_at_cursor returns nil when no parser"] = function()
   local symbol = require("pinwords.symbol")
   local originals = mock_treesitter({
     get_parser = function()
-      error("no parser")
+      return nil
     end,
   })
   local result = symbol.get_symbol_at_cursor()
@@ -371,8 +368,8 @@ end
 -- ============================================================================
 
 T["real TS: extracts function name in Lua"] = function()
-  local parser_ok = pcall(vim.treesitter.get_parser, 0, "lua")
-  if not parser_ok then
+  local parser = vim.treesitter.get_parser(0, "lua")
+  if not parser then
     MiniTest.skip("lua treesitter parser not available")
     return
   end
@@ -381,7 +378,7 @@ T["real TS: extracts function name in Lua"] = function()
   vim.bo.filetype = "lua"
 
   -- Force parse to ensure tree is available
-  local parser = vim.treesitter.get_parser(0, "lua")
+  parser = vim.treesitter.get_parser(0, "lua")
   parser:parse()
 
   -- Cursor on function name
@@ -392,8 +389,8 @@ T["real TS: extracts function name in Lua"] = function()
 end
 
 T["real TS: extracts identifier from keyword position in Lua"] = function()
-  local parser_ok = pcall(vim.treesitter.get_parser, 0, "lua")
-  if not parser_ok then
+  local parser = vim.treesitter.get_parser(0, "lua")
+  if not parser then
     MiniTest.skip("lua treesitter parser not available")
     return
   end
@@ -401,7 +398,7 @@ T["real TS: extracts identifier from keyword position in Lua"] = function()
   helpers.setup_buffer({ "local function myFunc()", "end" })
   vim.bo.filetype = "lua"
 
-  local parser = vim.treesitter.get_parser(0, "lua")
+  parser = vim.treesitter.get_parser(0, "lua")
   parser:parse()
 
   -- Cursor on "function" keyword
