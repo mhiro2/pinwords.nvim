@@ -356,7 +356,7 @@ T["fallback grep prefers ripgrep quickfix and preserves slot semantics"] = funct
   local orig_executable = vim.fn.executable
   local orig_system = vim.system
   local orig_setqflist = vim.fn.setqflist
-  local orig_nvim_command = vim.api.nvim_command
+  local orig_nvim_cmd = vim.api.nvim_cmd
 
   vim.fn.executable = function(bin)
     MiniTest.expect.equality(bin, "rg")
@@ -379,8 +379,9 @@ T["fallback grep prefers ripgrep quickfix and preserves slot semantics"] = funct
     captured.action = action
     captured.what = what
   end
-  vim.api.nvim_command = function(cmd)
+  vim.api.nvim_cmd = function(cmd, opts)
     captured.command = cmd
+    captured.command_opts = opts
   end
 
   local ok, err = pcall(function()
@@ -390,7 +391,7 @@ T["fallback grep prefers ripgrep quickfix and preserves slot semantics"] = funct
   vim.fn.executable = orig_executable
   vim.system = orig_system
   vim.fn.setqflist = orig_setqflist
-  vim.api.nvim_command = orig_nvim_command
+  vim.api.nvim_cmd = orig_nvim_cmd
 
   MiniTest.expect.equality(ok, true)
   MiniTest.expect.equality(err, nil)
@@ -408,7 +409,8 @@ T["fallback grep prefers ripgrep quickfix and preserves slot semantics"] = funct
   MiniTest.expect.equality(captured.what.items[1].lnum, 1)
   MiniTest.expect.equality(captured.what.items[1].col, 1)
   MiniTest.expect.equality(captured.what.items[1].text, "matched line")
-  MiniTest.expect.equality(captured.command, "copen")
+  MiniTest.expect.equality(captured.command, { cmd = "copen" })
+  MiniTest.expect.equality(captured.command_opts, {})
 end
 
 T["fallback grep falls back to vimgrep when ripgrep is unavailable"] = function()
@@ -420,7 +422,7 @@ T["fallback grep falls back to vimgrep when ripgrep is unavailable"] = function(
   local orig_executable = vim.fn.executable
   local orig_vimgrep = vim.fn.vimgrep
   local orig_getqflist = vim.fn.getqflist
-  local orig_nvim_command = vim.api.nvim_command
+  local orig_nvim_cmd = vim.api.nvim_cmd
 
   vim.fn.executable = function(bin)
     MiniTest.expect.equality(bin, "rg")
@@ -435,8 +437,9 @@ T["fallback grep falls back to vimgrep when ripgrep is unavailable"] = function(
   vim.fn.getqflist = function(_opts)
     return { size = 1 }
   end
-  vim.api.nvim_command = function(cmd)
+  vim.api.nvim_cmd = function(cmd, opts)
     captured.command = cmd
+    captured.command_opts = opts
   end
 
   local ok, err = pcall(function()
@@ -446,14 +449,15 @@ T["fallback grep falls back to vimgrep when ripgrep is unavailable"] = function(
   vim.fn.executable = orig_executable
   vim.fn.vimgrep = orig_vimgrep
   vim.fn.getqflist = orig_getqflist
-  vim.api.nvim_command = orig_nvim_command
+  vim.api.nvim_cmd = orig_nvim_cmd
 
   MiniTest.expect.equality(ok, true)
   MiniTest.expect.equality(err, nil)
   MiniTest.expect.equality(captured.pattern, "\\V\\cfoo/bar")
   MiniTest.expect.equality(captured.files, "**/*")
   MiniTest.expect.equality(captured.flags, "gj")
-  MiniTest.expect.equality(captured.command, "copen")
+  MiniTest.expect.equality(captured.command, { cmd = "copen" })
+  MiniTest.expect.equality(captured.command_opts, {})
 end
 
 T["fallback grep treats ripgrep no-match as info notification"] = function()

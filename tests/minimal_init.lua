@@ -16,6 +16,7 @@ package.path = table.concat({
 
 vim.opt.swapfile = false
 vim.opt.writebackup = false
+vim.opt.shadafile = "NONE"
 vim.opt.shortmess:append("W")
 
 local MiniTest = require("mini.test")

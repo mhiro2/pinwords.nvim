@@ -381,7 +381,7 @@ Fully customizable via standard highlight overrides.
 
 ## 📦 Requirements
 
-* Neovim >= 0.10
+* Neovim >= 0.12
 * No external dependencies
 * Optional: [telescope.nvim](https://github.com/nvim-telescope/telescope.nvim) for telescope integration
 * Optional: [snacks.nvim](https://github.com/folke/snacks.nvim) for snacks picker integration

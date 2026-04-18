@@ -215,7 +215,7 @@ local function open_quickfix(title, items)
     title = title,
     items = items,
   })
-  vim.api.nvim_command("copen")
+  vim.api.nvim_cmd({ cmd = "copen" }, {})
 end
 
 ---@param stdout string
@@ -320,7 +320,7 @@ function M._fallback_grep(slots, slot)
     return
   end
 
-  vim.api.nvim_command("copen")
+  vim.api.nvim_cmd({ cmd = "copen" }, {})
 end
 
 ---Run grep via the best available picker backend.
