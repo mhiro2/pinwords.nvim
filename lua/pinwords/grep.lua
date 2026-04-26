@@ -238,26 +238,12 @@ local function parse_rg_vimgrep(stdout)
   return items
 end
 
----@param rg_pattern string
----@return boolean
-local function try_rg_fallback(rg_pattern)
-  if vim.fn.executable("rg") ~= 1 or type(vim.system) ~= "function" then
-    return false
-  end
-
-  local result = vim
-    .system({
-      "rg",
-      "--vimgrep",
-      "--color=never",
-      "--no-heading",
-      rg_pattern,
-    }, { text = true })
-    :wait()
-
+---@param result vim.SystemCompleted
+---@return nil
+local function handle_rg_result(result)
   if result.code == 1 then
     vim.notify("pinwords: grep found no matches", vim.log.levels.INFO)
-    return true
+    return
   end
 
   if result.code ~= 0 then
@@ -266,17 +252,73 @@ local function try_rg_fallback(rg_pattern)
       msg = "rg exited with code " .. result.code
     end
     vim.notify("pinwords: grep failed: " .. msg, vim.log.levels.WARN)
-    return true
+    return
   end
 
   local items = parse_rg_vimgrep(result.stdout or "")
   if #items == 0 then
     vim.notify("pinwords: grep found no matches", vim.log.levels.INFO)
-    return true
+    return
   end
 
   open_quickfix("pinwords grep", items)
+end
+
+---Dispatch ripgrep asynchronously so the UI is not blocked while scanning.
+---Returns true when the rg invocation was started (whether or not it has completed).
+---@param rg_pattern string
+---@return boolean
+local function try_rg_fallback(rg_pattern)
+  if vim.fn.executable("rg") ~= 1 or type(vim.system) ~= "function" then
+    return false
+  end
+
+  vim.system({
+    "rg",
+    "--vimgrep",
+    "--color=never",
+    "--no-heading",
+    rg_pattern,
+  }, { text = true }, function(result)
+    vim.schedule(function()
+      handle_rg_result(result)
+    end)
+  end)
+
   return true
+end
+
+-- Wildignore globs applied around the synchronous vimgrep fallback so the
+-- traversal skips VCS metadata, dependency caches, and common build outputs.
+local FALLBACK_IGNORE_GLOBS = {
+  "**/.git/**",
+  "**/.hg/**",
+  "**/.svn/**",
+  "**/node_modules/**",
+  "**/vendor/**",
+  "**/deps/**",
+  "**/__pycache__/**",
+  "**/.venv/**",
+  "**/.tox/**",
+  "**/build/**",
+  "**/dist/**",
+  "**/target/**",
+  "**/.cache/**",
+}
+
+---Run vimgrep with a temporarily extended `wildignore` so the traversal does
+---not descend into VCS metadata, dependency caches, or build outputs.
+---@param vim_pattern string
+---@return boolean ok, string? err
+local function run_vimgrep_with_ignores(vim_pattern)
+  local saved_wildignore = vim.o.wildignore
+  local separator = saved_wildignore == "" and "" or ","
+  vim.o.wildignore = saved_wildignore .. separator .. table.concat(FALLBACK_IGNORE_GLOBS, ",")
+
+  local ok, err = pcall(vim.fn.vimgrep, vim_pattern, "**/*", "gj")
+
+  vim.o.wildignore = saved_wildignore
+  return ok, err
 end
 
 ---Run fallback grep using ripgrep when available, then Vim's vimgrep.
@@ -298,7 +340,11 @@ function M._fallback_grep(slots, slot)
     return
   end
 
-  local ok, err = pcall(vim.fn.vimgrep, vim_pattern, "**/*", "gj")
+  -- vimgrep is synchronous and walks the project tree, so warn the user before
+  -- the UI freezes while ripgrep is unavailable.
+  vim.notify("pinwords: ripgrep not available; scanning project files (this may take a moment)", vim.log.levels.INFO)
+
+  local ok, err = run_vimgrep_with_ignores(vim_pattern)
   if not ok then
     local msg = tostring(err)
     if msg:find("E480", 1, true) or msg:find("No match", 1, true) then
