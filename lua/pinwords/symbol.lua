@@ -37,10 +37,12 @@ local function find_symbol_in_children(node, bufnr)
 end
 
 --- Check whether a Treesitter parser exists for the buffer.
+--- Uses pcall because get_parser raises for filetypes without a registered parser.
 ---@param bufnr integer
 ---@return boolean
 function M.has_parser(bufnr)
-  return vim.treesitter.get_parser(bufnr) ~= nil
+  local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
+  return ok and parser ~= nil
 end
 
 --- Get the symbol name at the cursor position using Treesitter.
