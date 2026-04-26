@@ -357,23 +357,24 @@ T["fallback grep prefers ripgrep quickfix and preserves slot semantics"] = funct
   local orig_system = vim.system
   local orig_setqflist = vim.fn.setqflist
   local orig_nvim_cmd = vim.api.nvim_cmd
+  local orig_schedule = vim.schedule
 
   vim.fn.executable = function(bin)
     MiniTest.expect.equality(bin, "rg")
     return 1
   end
-  vim.system = function(argv, opts)
+  vim.system = function(argv, opts, on_exit)
     captured.argv = argv
     captured.opts = opts
-    return {
-      wait = function()
-        return {
-          code = 0,
-          stdout = "lua/pinwords/init.lua:1:1:matched line\n",
-          stderr = "",
-        }
-      end,
-    }
+    captured.on_exit_kind = type(on_exit)
+    if on_exit then
+      on_exit({
+        code = 0,
+        stdout = "lua/pinwords/init.lua:1:1:matched line\n",
+        stderr = "",
+      })
+    end
+    return {}
   end
   vim.fn.setqflist = function(_list, action, what)
     captured.action = action
@@ -382,6 +383,9 @@ T["fallback grep prefers ripgrep quickfix and preserves slot semantics"] = funct
   vim.api.nvim_cmd = function(cmd, opts)
     captured.command = cmd
     captured.command_opts = opts
+  end
+  vim.schedule = function(fn)
+    fn()
   end
 
   local ok, err = pcall(function()
@@ -392,6 +396,7 @@ T["fallback grep prefers ripgrep quickfix and preserves slot semantics"] = funct
   vim.system = orig_system
   vim.fn.setqflist = orig_setqflist
   vim.api.nvim_cmd = orig_nvim_cmd
+  vim.schedule = orig_schedule
 
   MiniTest.expect.equality(ok, true)
   MiniTest.expect.equality(err, nil)
@@ -403,6 +408,7 @@ T["fallback grep prefers ripgrep quickfix and preserves slot semantics"] = funct
     "(?i:foo/bar)",
   })
   MiniTest.expect.equality(captured.opts.text, true)
+  MiniTest.expect.equality(captured.on_exit_kind, "function")
   MiniTest.expect.equality(captured.action, " ")
   MiniTest.expect.equality(captured.what.title, "pinwords grep")
   MiniTest.expect.equality(captured.what.items[1].filename, "lua/pinwords/init.lua")
@@ -423,6 +429,8 @@ T["fallback grep falls back to vimgrep when ripgrep is unavailable"] = function(
   local orig_vimgrep = vim.fn.vimgrep
   local orig_getqflist = vim.fn.getqflist
   local orig_nvim_cmd = vim.api.nvim_cmd
+  local saved_wildignore = vim.o.wildignore
+  vim.o.wildignore = "*.bak"
 
   vim.fn.executable = function(bin)
     MiniTest.expect.equality(bin, "rg")
@@ -432,6 +440,7 @@ T["fallback grep falls back to vimgrep when ripgrep is unavailable"] = function(
     captured.pattern = pattern
     captured.files = files
     captured.flags = flags
+    captured.wildignore_during_call = vim.o.wildignore
     return 0
   end
   vim.fn.getqflist = function(_opts)
@@ -442,14 +451,20 @@ T["fallback grep falls back to vimgrep when ripgrep is unavailable"] = function(
     captured.command_opts = opts
   end
 
-  local ok, err = pcall(function()
-    grep._fallback_grep(slots, nil)
+  local ok, err
+  helpers.with_notify_override(function(notified)
+    ok, err = pcall(function()
+      grep._fallback_grep(slots, nil)
+    end)
+    captured.notified = notified
   end)
 
   vim.fn.executable = orig_executable
   vim.fn.vimgrep = orig_vimgrep
   vim.fn.getqflist = orig_getqflist
   vim.api.nvim_cmd = orig_nvim_cmd
+  local wildignore_after = vim.o.wildignore
+  vim.o.wildignore = saved_wildignore
 
   MiniTest.expect.equality(ok, true)
   MiniTest.expect.equality(err, nil)
@@ -458,6 +473,58 @@ T["fallback grep falls back to vimgrep when ripgrep is unavailable"] = function(
   MiniTest.expect.equality(captured.flags, "gj")
   MiniTest.expect.equality(captured.command, { cmd = "copen" })
   MiniTest.expect.equality(captured.command_opts, {})
+
+  -- wildignore is extended during the call and restored afterwards.
+  MiniTest.expect.equality(captured.wildignore_during_call:find("**/node_modules/**", 1, true) ~= nil, true)
+  MiniTest.expect.equality(captured.wildignore_during_call:find("**/.git/**", 1, true) ~= nil, true)
+  MiniTest.expect.equality(captured.wildignore_during_call:find("*.bak", 1, true) ~= nil, true)
+  MiniTest.expect.equality(wildignore_after, "*.bak")
+
+  -- The user is notified that the synchronous fallback is about to run.
+  local notified = captured.notified or {}
+  local saw_scan_notice = false
+  for _, entry in ipairs(notified) do
+    if entry.msg:find("ripgrep not available", 1, true) then
+      saw_scan_notice = true
+      break
+    end
+  end
+  MiniTest.expect.equality(saw_scan_notice, true)
+end
+
+T["fallback grep restores wildignore even when vimgrep raises"] = function()
+  local slots = {
+    [1] = slot_entry(1, "needle", "\\V\\cneedle"),
+  }
+
+  local orig_executable = vim.fn.executable
+  local orig_vimgrep = vim.fn.vimgrep
+  local saved_wildignore = vim.o.wildignore
+  vim.o.wildignore = "*.tmp"
+
+  vim.fn.executable = function()
+    return 0
+  end
+  vim.fn.vimgrep = function()
+    error("E480: No match: needle")
+  end
+
+  helpers.with_notify_override(function() end)
+
+  local ok = pcall(function()
+    helpers.with_notify_override(function()
+      grep._fallback_grep(slots, nil)
+    end)
+  end)
+
+  local wildignore_after = vim.o.wildignore
+
+  vim.fn.executable = orig_executable
+  vim.fn.vimgrep = orig_vimgrep
+  vim.o.wildignore = saved_wildignore
+
+  MiniTest.expect.equality(ok, true)
+  MiniTest.expect.equality(wildignore_after, "*.tmp")
 end
 
 T["fallback grep treats ripgrep no-match as info notification"] = function()
@@ -467,19 +534,18 @@ T["fallback grep treats ripgrep no-match as info notification"] = function()
 
   local orig_executable = vim.fn.executable
   local orig_system = vim.system
+  local orig_schedule = vim.schedule
   vim.fn.executable = function()
     return 1
   end
-  vim.system = function(_argv, _opts)
-    return {
-      wait = function()
-        return {
-          code = 1,
-          stdout = "",
-          stderr = "",
-        }
-      end,
-    }
+  vim.system = function(_argv, _opts, on_exit)
+    if on_exit then
+      on_exit({ code = 1, stdout = "", stderr = "" })
+    end
+    return {}
+  end
+  vim.schedule = function(fn)
+    fn()
   end
 
   local ok, err = pcall(function()
@@ -493,6 +559,7 @@ T["fallback grep treats ripgrep no-match as info notification"] = function()
 
   vim.fn.executable = orig_executable
   vim.system = orig_system
+  vim.schedule = orig_schedule
 
   MiniTest.expect.equality(ok, true)
   MiniTest.expect.equality(err, nil)

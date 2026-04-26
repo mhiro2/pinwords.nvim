@@ -96,6 +96,19 @@ T["has_parser returns true when parser exists"] = function()
   MiniTest.expect.equality(result, true)
 end
 
+T["has_parser returns false when get_parser raises"] = function()
+  helpers.setup_buffer({ "hello world" })
+  local symbol = require("pinwords.symbol")
+  local originals = mock_treesitter({
+    get_parser = function()
+      error("no parser for filetype")
+    end,
+  })
+  local result = symbol.has_parser(vim.api.nvim_get_current_buf())
+  restore_treesitter(originals)
+  MiniTest.expect.equality(result, false)
+end
+
 -- ============================================================================
 -- Unit tests: symbol.get_symbol_at_cursor
 -- ============================================================================
@@ -106,6 +119,19 @@ T["get_symbol_at_cursor returns nil when no parser"] = function()
   local originals = mock_treesitter({
     get_parser = function()
       return nil
+    end,
+  })
+  local result = symbol.get_symbol_at_cursor()
+  restore_treesitter(originals)
+  MiniTest.expect.equality(result, nil)
+end
+
+T["get_symbol_at_cursor returns nil when get_parser raises"] = function()
+  helpers.setup_buffer({ "hello world" })
+  local symbol = require("pinwords.symbol")
+  local originals = mock_treesitter({
+    get_parser = function()
+      error("no parser for filetype")
     end,
   })
   local result = symbol.get_symbol_at_cursor()
@@ -254,6 +280,25 @@ T["set with source=symbol falls back to cword when no parser"] = function()
 
   symbol_mod.get_symbol_at_cursor = orig_get
 
+  local slots = require("pinwords").list()
+  MiniTest.expect.equality(slots[1].raw, "hello")
+end
+
+T["PinWordSymbol falls back to cword when parser is missing"] = function()
+  helpers.setup_buffer({ "hello world" })
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
+
+  local originals = mock_treesitter({
+    get_parser = function()
+      error("no parser for filetype")
+    end,
+  })
+
+  local ok = pcall(vim.cmd, "PinWordSymbol 1")
+
+  restore_treesitter(originals)
+
+  MiniTest.expect.equality(ok, true)
   local slots = require("pinwords").list()
   MiniTest.expect.equality(slots[1].raw, "hello")
 end
