@@ -16,12 +16,12 @@ local RG_META = "[%.%+%*%?%^%$%(%)%[%]%{%}%|\\]"
 ---@param entry PinwordsSlot
 ---@return PinwordsGrepEntry
 local function to_grep_entry(entry)
-  local pattern = type(entry.pattern) == "string" and entry.pattern or ""
-  local body = pattern:sub(5)
+  -- Match semantics are captured on the slot at pin time, so read them
+  -- directly instead of reparsing the saved Vim pattern.
   return {
     raw = entry.raw,
-    whole_word = body:sub(1, 2) == "\\<" and body:sub(-2) == "\\>",
-    case_sensitive = pattern:sub(1, 4) == "\\V\\C",
+    whole_word = entry.whole_word,
+    case_sensitive = entry.case_sensitive,
   }
 end
 

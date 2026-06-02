@@ -185,6 +185,8 @@ local function build_entry(raw, slot, opts)
     raw = raw,
     pattern = pattern_text,
     hl_group = "PinWord" .. slot,
+    whole_word = value_or(opts and opts.whole_word, config.whole_word),
+    case_sensitive = value_or(opts and opts.case_sensitive, config.case_sensitive),
   }
 end
 

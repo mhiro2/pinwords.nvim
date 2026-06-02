@@ -25,10 +25,15 @@ end
 ---@param pattern string
 ---@return PinwordsSlot
 local function slot_entry(slot, raw, pattern)
+  -- Mirror how build_entry derives match semantics so these fixtures match real
+  -- slots: whole-word wraps the body in \< \>, and \V\C marks case sensitivity.
+  local body = pattern:sub(5)
   return {
     raw = raw,
     pattern = pattern,
     hl_group = "PinWord" .. slot,
+    whole_word = body:sub(1, 2) == "\\<" and body:sub(-2) == "\\>",
+    case_sensitive = pattern:sub(1, 4) == "\\V\\C",
   }
 end
 

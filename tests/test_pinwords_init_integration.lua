@@ -155,7 +155,13 @@ T["setup initializes from existing global state"] = function()
 
   vim.g.pinwords_global = {
     slots = {
-      [1] = { raw = "existing", pattern = "\\V\\c\\<existing\\>", hl_group = "PinWord1" },
+      [1] = {
+        raw = "existing",
+        pattern = "\\V\\c\\<existing\\>",
+        hl_group = "PinWord1",
+        whole_word = true,
+        case_sensitive = false,
+      },
     },
     order = { 1 },
     last_used = { [1] = 1 },
