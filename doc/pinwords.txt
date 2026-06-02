@@ -261,10 +261,12 @@ GREP INTEGRATION                                              *pinwords-grep*
 
   Picker Backend: ~
     Grep uses the same priority as other picker features:
-    snacks -> telescope -> fzf-lua -> vimgrep (quickfix) fallback.
+    snacks -> telescope -> fzf-lua -> quickfix fallback.
     Grep backends are line-oriented, so multi-line pinned words are skipped.
-    When no picker backend is available, both commands fall back to one-shot
-    quickfix grep via rg when available, otherwise via vimgrep.
+    When no picker backend is available, both commands fall back to a quickfix
+    grep. The fallback prefers asynchronous tools so the UI stays responsive:
+    rg when available, then git grep inside a Git repository, and finally a
+    synchronous vimgrep only when neither is present.
 
   Example Key Mappings: ~
 >lua
