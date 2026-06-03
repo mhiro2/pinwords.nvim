@@ -33,14 +33,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Delete previous benchmark comment if exists
-          gh pr view "${{ github.event.pull_request.number }}" \
-            --repo "${{ github.repository }}" \
-            --json comments --jq '.comments[].id' | while read -r id; do
-            body=$(gh api "repos/${{ github.repository }}/issues/comments/${id}" --jq '.body')
-            if echo "${body}" | grep -q '<!-- pinwords-bench -->'; then
-              gh api --method DELETE "repos/${{ github.repository }}/issues/comments/${id}"
-            fi
+          # Delete previous benchmark comment if it exists. List comments via
+          # the REST API: it returns numeric comment ids usable with the
+          # issues/comments endpoint, whereas `gh pr view --json comments`
+          # returns GraphQL node ids that 404 against that REST endpoint.
+          gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            --paginate \
+            --jq '.[] | select(.body | contains("<!-- pinwords-bench -->")) | .id' | while read -r id; do
+            gh api --method DELETE "repos/${{ github.repository }}/issues/comments/${id}"
           done
 
           # Post new comment
