@@ -15,15 +15,23 @@ local function open_picker()
   pcall(telescope.load_extension, "pinwords")
   telescope.extensions.pinwords.pinwords()
 
-  vim.wait(200, function()
+  -- Wait until the Telescope prompt is ready for input rather than sleeping a
+  -- fixed amount, so the picker is reliably attached before keys are fed.
+  vim.wait(2000, function()
     return vim.bo.buftype == "prompt"
   end)
 end
 
-local function feed(keys)
+---Feed `keys` to the open picker and poll until `cond` holds (or it times out).
+---`nvim_feedkeys` with the "x" flag executes the typeahead synchronously so the
+---picker's insert-mode mapping fires reliably in headless runs; `nvim_input`
+---left the prompt in normal mode under newer Telescope, dropping the keypress.
+---@param keys string
+---@param cond fun(): boolean
+local function feed_until(keys, cond)
   local termcodes = vim.api.nvim_replace_termcodes(keys, true, false, true)
-  vim.api.nvim_input(termcodes)
-  vim.wait(200)
+  vim.api.nvim_feedkeys(termcodes, "x", false)
+  vim.wait(2000, cond)
 end
 
 T["telescope extension loads successfully"] = function()
@@ -84,11 +92,26 @@ T["telescope <C-d> unpins selected entry"] = function()
   pinwords.set(2)
 
   open_picker()
-  feed("<C-d>")
+
+  -- Capture which slot is selected; Telescope's default selection is not
+  -- guaranteed to be the first slot, so assert against the actual selection.
+  local action_state = require("telescope.actions.state")
+  vim.wait(2000, function()
+    local entry = action_state.get_selected_entry()
+    return entry ~= nil and entry.value ~= nil
+  end)
+  local selection = action_state.get_selected_entry()
+  local selected_slot = selection and selection.value and selection.value.slot
+
+  feed_until("<C-d>", function()
+    return selected_slot ~= nil and pinwords.list()[selected_slot] == nil
+  end)
 
   local slots = pinwords.list()
-  MiniTest.expect.equality(slots[1], nil)
-  MiniTest.expect.equality(slots[2].raw, "bar")
+  MiniTest.expect.equality(type(selected_slot), "number")
+  -- Only the selected entry is unpinned; the other pin remains.
+  MiniTest.expect.equality(slots[selected_slot], nil)
+  MiniTest.expect.equality(vim.tbl_count(slots), 1)
 end
 
 T["telescope <C-x> clears all entries"] = function()
@@ -101,7 +124,9 @@ T["telescope <C-x> clears all entries"] = function()
   pinwords.set(2)
 
   open_picker()
-  feed("<C-x>")
+  feed_until("<C-x>", function()
+    return next(pinwords.list()) == nil
+  end)
 
   local slots = pinwords.list()
   MiniTest.expect.equality(next(slots), nil)

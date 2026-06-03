@@ -362,13 +362,16 @@ Search your entire project using pinned words. All pinned words are combined wit
 
 ### Picker Backend
 
-Grep uses the same priority as other picker features: **snacks → telescope → fzf-lua → vimgrep (quickfix) fallback**.
+Grep uses the same priority as other picker features: **snacks → telescope → fzf-lua → quickfix fallback**.
 
 No additional configuration is needed — if you have a picker enabled for `:PinWordList`, grep will use the same backend automatically.
 
 > [!NOTE]
 > Grep backends are line-oriented, so multi-line pinned words are skipped.
-> When no picker backend is available, both commands fall back to one-shot quickfix grep via `rg` when available, then `vimgrep`.
+> When no picker backend is available, both commands fall back to a quickfix grep.
+> The fallback prefers asynchronous tools so the UI stays responsive: `rg` when
+> available, then `git grep` inside a Git repository, and finally a synchronous
+> `vimgrep` only when neither is present.
 ## 🎨 Highlight Groups
 
 ```vim

@@ -137,8 +137,14 @@ T["UnpinAllWords clears all slots"] = function()
 end
 
 T["PinWordList command description indicates global scope"] = function()
-  local output = vim.api.nvim_exec2("command PinWordList", { output = true }).output
-  MiniTest.expect.equality(output:find("List global pinned words in interactive picker.", 1, true) ~= nil, true)
+  -- Read the description via the API rather than parsing `:command` output,
+  -- whose column wrapping/truncation varies across Neovim versions. Newer
+  -- Neovim exposes the description in `desc`; older Neovim put it in
+  -- `definition`, so check both.
+  local cmd = vim.api.nvim_get_commands({ builtin = false }).PinWordList
+  MiniTest.expect.equality(cmd ~= nil, true)
+  local description = (cmd.desc or "") .. (cmd.definition or "")
+  MiniTest.expect.equality(description:find("List global pinned words in interactive picker.", 1, true) ~= nil, true)
 end
 
 T["PinWordList opens interactive picker"] = function()

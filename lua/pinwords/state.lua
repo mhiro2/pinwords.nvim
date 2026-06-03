@@ -2,6 +2,8 @@
 ---@field raw string
 ---@field pattern string
 ---@field hl_group string
+---@field whole_word boolean   -- match semantics captured at pin time
+---@field case_sensitive boolean
 
 ---@class PinwordsCwordState
 ---@field enabled boolean

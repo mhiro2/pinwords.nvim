@@ -16,12 +16,12 @@ local RG_META = "[%.%+%*%?%^%$%(%)%[%]%{%}%|\\]"
 ---@param entry PinwordsSlot
 ---@return PinwordsGrepEntry
 local function to_grep_entry(entry)
-  local pattern = type(entry.pattern) == "string" and entry.pattern or ""
-  local body = pattern:sub(5)
+  -- Match semantics are captured on the slot at pin time, so read them
+  -- directly instead of reparsing the saved Vim pattern.
   return {
     raw = entry.raw,
-    whole_word = body:sub(1, 2) == "\\<" and body:sub(-2) == "\\>",
-    case_sensitive = pattern:sub(1, 4) == "\\V\\C",
+    whole_word = entry.whole_word,
+    case_sensitive = entry.case_sensitive,
   }
 end
 
@@ -288,6 +288,120 @@ local function try_rg_fallback(rg_pattern)
   return true
 end
 
+---Return true when the cwd is inside a Git working tree. `git grep` is run from
+---the cwd (not the repository root) so it searches the cwd subtree, matching the
+---scope of the `rg` and `vimgrep` fallbacks.
+---@return boolean
+local function inside_git_repo()
+  local cwd = vim.uv.cwd()
+  if not cwd then
+    return false
+  end
+  return vim.fs.root(cwd, ".git") ~= nil
+end
+
+---Build the `git grep` argv for a single pinned entry. `-F` keeps the term a
+---literal so there is no regex-dialect mismatch, while `-w`/`-i` reproduce the
+---slot's whole-word and case sensitivity. `-n --column` output matches the
+---`file:line:col:text` shape that `parse_rg_vimgrep` already understands.
+---`--untracked --exclude-standard` mirrors ripgrep: search tracked files plus
+---untracked files that are not gitignored.
+---@param entry PinwordsGrepEntry
+---@return string[]
+local function build_git_grep_cmd(entry)
+  local cmd = { "git", "grep", "--no-color", "-I", "-n", "--column", "--untracked", "--exclude-standard", "-F" }
+  if entry.whole_word then
+    cmd[#cmd + 1] = "-w"
+  end
+  if not entry.case_sensitive then
+    cmd[#cmd + 1] = "-i"
+  end
+  cmd[#cmd + 1] = "-e"
+  cmd[#cmd + 1] = entry.raw
+  return cmd
+end
+
+---Sort quickfix items by location and drop exact duplicates so overlapping
+---per-entry matches do not appear twice in the merged list.
+---@param items vim.quickfix.entry[]
+---@return vim.quickfix.entry[]
+local function sort_and_dedup_items(items)
+  table.sort(items, function(a, b)
+    if a.filename ~= b.filename then
+      return a.filename < b.filename
+    end
+    if a.lnum ~= b.lnum then
+      return a.lnum < b.lnum
+    end
+    return a.col < b.col
+  end)
+
+  local seen = {}
+  local out = {}
+  for _, item in ipairs(items) do
+    local key = ("%s:%d:%d"):format(item.filename, item.lnum, item.col)
+    if not seen[key] then
+      seen[key] = true
+      out[#out + 1] = item
+    end
+  end
+  return out
+end
+
+---Run `git grep` for every entry asynchronously, merging the results into a
+---single quickfix list once all invocations finish. Each entry uses its own
+---invocation because `-w`/`-i` are global flags in git grep, so per-slot match
+---semantics could not otherwise be honored in one call. Returns true when the
+---invocations were started so the caller skips the synchronous fallback.
+---@param entries PinwordsGrepEntry[]
+---@return boolean
+local function try_git_grep_fallback(entries)
+  if type(vim.system) ~= "function" or vim.fn.executable("git") ~= 1 then
+    return false
+  end
+  if not inside_git_repo() then
+    return false
+  end
+
+  local pending = #entries
+  local items = {}
+  ---@type string|nil
+  local err_msg = nil
+
+  for _, entry in ipairs(entries) do
+    vim.system(build_git_grep_cmd(entry), { text = true }, function(result)
+      vim.schedule(function()
+        if result.code == 0 then
+          for _, item in ipairs(parse_rg_vimgrep(result.stdout or "")) do
+            items[#items + 1] = item
+          end
+        elseif result.code ~= 1 then
+          local msg = vim.trim(result.stderr or "")
+          if msg == "" then
+            msg = "git grep exited with code " .. result.code
+          end
+          err_msg = err_msg or msg
+        end
+
+        pending = pending - 1
+        if pending > 0 then
+          return
+        end
+
+        if #items > 0 then
+          open_quickfix("pinwords grep", sort_and_dedup_items(items))
+        elseif err_msg then
+          vim.notify("pinwords: grep failed: " .. err_msg, vim.log.levels.WARN)
+        else
+          vim.notify("pinwords: grep found no matches", vim.log.levels.INFO)
+        end
+      end)
+    end)
+  end
+
+  return true
+end
+
 -- Wildignore globs applied around the synchronous vimgrep fallback so the
 -- traversal skips VCS metadata, dependency caches, and common build outputs.
 local FALLBACK_IGNORE_GLOBS = {
@@ -335,13 +449,20 @@ function M._fallback_grep(slots, slot)
     return
   end
 
+  -- ripgrep is unavailable; delegate to an asynchronous `git grep` so large
+  -- repositories no longer freeze the UI the way a synchronous vimgrep does.
+  if try_git_grep_fallback(entries) then
+    return
+  end
+
   local vim_pattern = build_vim_pattern_from_entries(entries)
   if not vim_pattern then
     return
   end
 
-  -- vimgrep is synchronous and walks the project tree, so warn the user before
-  -- the UI freezes while ripgrep is unavailable.
+  -- Neither ripgrep nor git is available, so fall back to Vim's synchronous
+  -- vimgrep. It walks the project tree in-process, so warn before the UI
+  -- freezes; wildignore is extended to skip VCS metadata and build outputs.
   vim.notify("pinwords: ripgrep not available; scanning project files (this may take a moment)", vim.log.levels.INFO)
 
   local ok, err = run_vimgrep_with_ignores(vim_pattern)

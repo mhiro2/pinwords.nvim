@@ -487,7 +487,7 @@ T["init_global_state loads existing state"] = function()
 
   vim.g.pinwords_global = {
     slots = {
-      [1] = { raw = "test", pattern = "test", hl_group = "PinWord1" },
+      [1] = { raw = "test", pattern = "test", hl_group = "PinWord1", whole_word = true, case_sensitive = true },
     },
   }
 
@@ -503,7 +503,7 @@ T["init_global_state resets state when slot metadata is invalid"] = function()
 
   vim.g.pinwords_global = {
     slots = {
-      [1] = { raw = "test", pattern = "test", hl_group = 123 },
+      [1] = { raw = "test", pattern = "test", hl_group = 123, whole_word = true, case_sensitive = true },
     },
   }
 
@@ -519,7 +519,7 @@ T["init_global_state resets state when order or tick metadata is inconsistent"] 
 
   vim.g.pinwords_global = {
     slots = {
-      [1] = { raw = "test", pattern = "test", hl_group = "PinWord1" },
+      [1] = { raw = "test", pattern = "test", hl_group = "PinWord1", whole_word = true, case_sensitive = true },
     },
     order = { 1, 2 }, -- references missing slot 2
     last_used = { [1] = 3 },
@@ -538,7 +538,7 @@ T["init_global_state keeps state when metadata is consistent"] = function()
 
   vim.g.pinwords_global = {
     slots = {
-      [1] = { raw = "test", pattern = "test", hl_group = "PinWord1" },
+      [1] = { raw = "test", pattern = "test", hl_group = "PinWord1", whole_word = true, case_sensitive = true },
     },
     order = { 1 },
     last_used = { [1] = 3 },

@@ -53,6 +53,8 @@ local function validate_slot_entry(entry)
     and type(entry.raw) == "string"
     and type(entry.pattern) == "string"
     and type(entry.hl_group) == "string"
+    and type(entry.whole_word) == "boolean"
+    and type(entry.case_sensitive) == "boolean"
 end
 
 ---@param slots table

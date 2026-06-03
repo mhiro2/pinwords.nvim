@@ -25,10 +25,15 @@ end
 ---@param pattern string
 ---@return PinwordsSlot
 local function slot_entry(slot, raw, pattern)
+  -- Mirror how build_entry derives match semantics so these fixtures match real
+  -- slots: whole-word wraps the body in \< \>, and \V\C marks case sensitivity.
+  local body = pattern:sub(5)
   return {
     raw = raw,
     pattern = pattern,
     hl_group = "PinWord" .. slot,
+    whole_word = body:sub(1, 2) == "\\<" and body:sub(-2) == "\\>",
+    case_sensitive = pattern:sub(1, 4) == "\\V\\C",
   }
 end
 
@@ -176,14 +181,22 @@ end
 
 T["PinWordGrep command is registered"] = function()
   helpers.setup_buffer({ "foo bar baz" })
-  local output = vim.api.nvim_exec2("command PinWordGrep", { output = true }).output
-  MiniTest.expect.equality(output:find("Grep pinned words across project.", 1, true) ~= nil, true)
+  -- Read the description via the API rather than parsing `:command` output,
+  -- whose column wrapping/truncation varies across Neovim versions. Newer
+  -- Neovim exposes the description in `desc`; older Neovim put it in
+  -- `definition`, so check both.
+  local cmd = vim.api.nvim_get_commands({ builtin = false }).PinWordGrep
+  MiniTest.expect.equality(cmd ~= nil, true)
+  local description = (cmd.desc or "") .. (cmd.definition or "")
+  MiniTest.expect.equality(description:find("Grep pinned words across project.", 1, true) ~= nil, true)
 end
 
 T["PinWordLiveGrep command is registered"] = function()
   helpers.setup_buffer({ "foo bar baz" })
-  local output = vim.api.nvim_exec2("command PinWordLiveGrep", { output = true }).output
-  MiniTest.expect.equality(output:find("Live grep pinned words across project.", 1, true) ~= nil, true)
+  local cmd = vim.api.nvim_get_commands({ builtin = false }).PinWordLiveGrep
+  MiniTest.expect.equality(cmd ~= nil, true)
+  local description = (cmd.desc or "") .. (cmd.definition or "")
+  MiniTest.expect.equality(description:find("Live grep pinned words across project.", 1, true) ~= nil, true)
 end
 
 -- ==========================================================================
@@ -433,7 +446,8 @@ T["fallback grep falls back to vimgrep when ripgrep is unavailable"] = function(
   vim.o.wildignore = "*.bak"
 
   vim.fn.executable = function(bin)
-    MiniTest.expect.equality(bin, "rg")
+    captured.checked = captured.checked or {}
+    captured.checked[bin] = true
     return 0
   end
   vim.fn.vimgrep = function(pattern, files, flags)
@@ -468,6 +482,9 @@ T["fallback grep falls back to vimgrep when ripgrep is unavailable"] = function(
 
   MiniTest.expect.equality(ok, true)
   MiniTest.expect.equality(err, nil)
+  -- Both ripgrep and git are probed before falling back to vimgrep.
+  MiniTest.expect.equality(captured.checked.rg, true)
+  MiniTest.expect.equality(captured.checked.git, true)
   MiniTest.expect.equality(captured.pattern, "\\V\\cfoo/bar")
   MiniTest.expect.equality(captured.files, "**/*")
   MiniTest.expect.equality(captured.flags, "gj")
@@ -560,6 +577,168 @@ T["fallback grep treats ripgrep no-match as info notification"] = function()
   vim.fn.executable = orig_executable
   vim.system = orig_system
   vim.schedule = orig_schedule
+
+  MiniTest.expect.equality(ok, true)
+  MiniTest.expect.equality(err, nil)
+end
+
+T["fallback grep uses async git grep when ripgrep is unavailable"] = function()
+  local slots = {
+    [1] = {
+      raw = "foo",
+      pattern = "\\V\\C\\<foo\\>",
+      hl_group = "PinWord1",
+      whole_word = true,
+      case_sensitive = true,
+    },
+    [2] = {
+      raw = "bar",
+      pattern = "\\V\\cbar",
+      hl_group = "PinWord2",
+      whole_word = false,
+      case_sensitive = false,
+    },
+  }
+
+  local captured = { argvs = {} }
+  local stdout_by_term = {
+    foo = "lua/a.lua:2:5:has foo here\n",
+    bar = "lua/b.lua:1:1:bar at start\n",
+  }
+
+  local orig_executable = vim.fn.executable
+  local orig_system = vim.system
+  local orig_schedule = vim.schedule
+  local orig_setqflist = vim.fn.setqflist
+  local orig_nvim_cmd = vim.api.nvim_cmd
+  local orig_fs_root = vim.fs.root
+
+  vim.fn.executable = function(bin)
+    return bin == "git" and 1 or 0
+  end
+  vim.fs.root = function()
+    return "/repo"
+  end
+  vim.system = function(argv, opts, on_exit)
+    captured.argvs[#captured.argvs + 1] = argv
+    captured.opts = opts
+    if on_exit then
+      on_exit({ code = 0, stdout = stdout_by_term[argv[#argv]] or "", stderr = "" })
+    end
+    return {}
+  end
+  vim.schedule = function(fn)
+    fn()
+  end
+  vim.fn.setqflist = function(_list, action, what)
+    captured.action = action
+    captured.what = what
+  end
+  vim.api.nvim_cmd = function(cmd, opts)
+    captured.command = cmd
+    captured.command_opts = opts
+  end
+
+  local ok, err = pcall(function()
+    grep._fallback_grep(slots, nil)
+  end)
+
+  vim.fn.executable = orig_executable
+  vim.system = orig_system
+  vim.schedule = orig_schedule
+  vim.fn.setqflist = orig_setqflist
+  vim.api.nvim_cmd = orig_nvim_cmd
+  vim.fs.root = orig_fs_root
+
+  MiniTest.expect.equality(ok, true)
+  MiniTest.expect.equality(err, nil)
+
+  -- One invocation per slot, each carrying its own whole-word/case flags.
+  MiniTest.expect.equality(#captured.argvs, 2)
+  MiniTest.expect.equality(captured.argvs[1], {
+    "git",
+    "grep",
+    "--no-color",
+    "-I",
+    "-n",
+    "--column",
+    "--untracked",
+    "--exclude-standard",
+    "-F",
+    "-w",
+    "-e",
+    "foo",
+  })
+  MiniTest.expect.equality(captured.argvs[2], {
+    "git",
+    "grep",
+    "--no-color",
+    "-I",
+    "-n",
+    "--column",
+    "--untracked",
+    "--exclude-standard",
+    "-F",
+    "-i",
+    "-e",
+    "bar",
+  })
+  MiniTest.expect.equality(captured.opts.text, true)
+
+  -- Per-entry matches are merged and sorted into a single quickfix list.
+  MiniTest.expect.equality(captured.action, " ")
+  MiniTest.expect.equality(captured.what.title, "pinwords grep")
+  MiniTest.expect.equality(#captured.what.items, 2)
+  MiniTest.expect.equality(captured.what.items[1].filename, "lua/a.lua")
+  MiniTest.expect.equality(captured.what.items[2].filename, "lua/b.lua")
+  MiniTest.expect.equality(captured.command, { cmd = "copen" })
+end
+
+T["fallback grep reports no matches when git grep finds nothing"] = function()
+  local slots = {
+    [1] = {
+      raw = "zzz",
+      pattern = "\\V\\czzz",
+      hl_group = "PinWord1",
+      whole_word = false,
+      case_sensitive = false,
+    },
+  }
+
+  local orig_executable = vim.fn.executable
+  local orig_system = vim.system
+  local orig_schedule = vim.schedule
+  local orig_fs_root = vim.fs.root
+
+  vim.fn.executable = function(bin)
+    return bin == "git" and 1 or 0
+  end
+  vim.fs.root = function()
+    return "/repo"
+  end
+  vim.system = function(_argv, _opts, on_exit)
+    if on_exit then
+      on_exit({ code = 1, stdout = "", stderr = "" })
+    end
+    return {}
+  end
+  vim.schedule = function(fn)
+    fn()
+  end
+
+  local ok, err = pcall(function()
+    helpers.with_notify_override(function(notified)
+      grep._fallback_grep(slots, nil)
+      MiniTest.expect.equality(#notified > 0, true)
+      MiniTest.expect.equality(notified[#notified].msg:find("grep found no matches", 1, true) ~= nil, true)
+      MiniTest.expect.equality(notified[#notified].level, vim.log.levels.INFO)
+    end)
+  end)
+
+  vim.fn.executable = orig_executable
+  vim.system = orig_system
+  vim.schedule = orig_schedule
+  vim.fs.root = orig_fs_root
 
   MiniTest.expect.equality(ok, true)
   MiniTest.expect.equality(err, nil)
