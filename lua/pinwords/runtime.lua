@@ -2,6 +2,7 @@ local cword = require("pinwords.runtime.cword")
 local flash = require("pinwords.flash")
 local highlight = require("pinwords.highlight")
 local matcher = require("pinwords.matcher")
+local state = require("pinwords.state")
 
 local M = {}
 
@@ -15,7 +16,7 @@ local M = {}
 ---@type PinwordsRuntimeConfig
 local config = {
   augroup_name = "PinWords",
-  slots = 8,
+  slots = 9,
   colors = nil,
   build_pattern = function(raw)
     return raw
@@ -51,7 +52,26 @@ local function reapply_all_windows()
   end
 end
 
----@param opts? Partial<PinwordsRuntimeConfig>
+-- Single drop point for all per-window state when a window is closed. The
+-- window's matches die with it, so we only release our bookkeeping: cword
+-- timers/enabled flags, flash match+timer, and the shared window store
+-- (matcher match_ids + cword entry).
+---@param win integer
+---@return nil
+local function cleanup_window(win)
+  cword.handle_win_closed(win)
+  flash.clear_for_window(win)
+  state.clear_win_state(win)
+end
+
+---@class PinwordsRuntimeSetupOpts
+---@field augroup_name? string
+---@field slots? integer
+---@field colors? PinwordsColorsConfig
+---@field build_pattern? fun(raw: string): string
+---@field cword_debounce_ms? integer
+
+---@param opts? PinwordsRuntimeSetupOpts
 ---@return nil
 function M.setup(opts)
   if type(opts) == "table" then
@@ -114,8 +134,7 @@ function M.setup(opts)
     callback = function(args)
       local win = tonumber(args.match)
       if win then
-        cword.handle_win_closed(win)
-        flash.clear_for_window(win)
+        cleanup_window(win)
       end
     end,
   })
