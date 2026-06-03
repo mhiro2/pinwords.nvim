@@ -181,14 +181,22 @@ end
 
 T["PinWordGrep command is registered"] = function()
   helpers.setup_buffer({ "foo bar baz" })
-  local output = vim.api.nvim_exec2("command PinWordGrep", { output = true }).output
-  MiniTest.expect.equality(output:find("Grep pinned words across project.", 1, true) ~= nil, true)
+  -- Read the description via the API rather than parsing `:command` output,
+  -- whose column wrapping/truncation varies across Neovim versions. Newer
+  -- Neovim exposes the description in `desc`; older Neovim put it in
+  -- `definition`, so check both.
+  local cmd = vim.api.nvim_get_commands({ builtin = false }).PinWordGrep
+  MiniTest.expect.equality(cmd ~= nil, true)
+  local description = (cmd.desc or "") .. (cmd.definition or "")
+  MiniTest.expect.equality(description:find("Grep pinned words across project.", 1, true) ~= nil, true)
 end
 
 T["PinWordLiveGrep command is registered"] = function()
   helpers.setup_buffer({ "foo bar baz" })
-  local output = vim.api.nvim_exec2("command PinWordLiveGrep", { output = true }).output
-  MiniTest.expect.equality(output:find("Live grep pinned words across project.", 1, true) ~= nil, true)
+  local cmd = vim.api.nvim_get_commands({ builtin = false }).PinWordLiveGrep
+  MiniTest.expect.equality(cmd ~= nil, true)
+  local description = (cmd.desc or "") .. (cmd.definition or "")
+  MiniTest.expect.equality(description:find("Live grep pinned words across project.", 1, true) ~= nil, true)
 end
 
 -- ==========================================================================
