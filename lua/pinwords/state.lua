@@ -122,9 +122,16 @@ function M.set_win_state(win, win_state)
   window_state.set(win, win_state)
 end
 
+---@param win integer
+---@return nil
+function M.clear_win_state(win)
+  window_state.clear(win)
+end
+
 ---@return nil
 function M.teardown()
   global_state.teardown()
+  window_state.clear_all()
 end
 
 return M

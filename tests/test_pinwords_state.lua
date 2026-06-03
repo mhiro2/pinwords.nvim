@@ -457,9 +457,9 @@ T["get_win_state initializes missing fields"] = function()
   helpers.setup_buffer({ "test" })
   local win = vim.api.nvim_get_current_win()
 
-  vim.api.nvim_win_set_var(win, "pinwords", {})
-
   local state = require("pinwords.state")
+  state.set_win_state(win, {})
+
   local win_state = state.get_win_state(win)
 
   MiniTest.expect.equality(type(win_state.match_ids), "table")
@@ -471,14 +471,31 @@ T["get_win_state fixes invalid cword.enabled"] = function()
   helpers.setup_buffer({ "test" })
   local win = vim.api.nvim_get_current_win()
 
-  vim.api.nvim_win_set_var(win, "pinwords", {
+  local state = require("pinwords.state")
+  state.set_win_state(win, {
     match_ids = {},
     cword = {},
   })
 
-  local state = require("pinwords.state")
   local win_state = state.get_win_state(win)
 
+  MiniTest.expect.equality(win_state.cword.enabled, false)
+end
+
+T["clear_win_state drops window state"] = function()
+  helpers.setup_buffer({ "test" })
+  local win = vim.api.nvim_get_current_win()
+
+  local state = require("pinwords.state")
+  state.set_win_state(win, {
+    match_ids = { [1] = 123 },
+    cword = { enabled = true, match_id = 456, pattern = "test" },
+  })
+
+  state.clear_win_state(win)
+
+  local win_state = state.get_win_state(win)
+  MiniTest.expect.equality(next(win_state.match_ids), nil)
   MiniTest.expect.equality(win_state.cword.enabled, false)
 end
 
