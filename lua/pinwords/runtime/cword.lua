@@ -21,6 +21,12 @@ local enabled_wins = {}
 ---@type table<integer, uv.uv_timer_t>
 local timers = {}
 
+-- Per-window debounce generation. Bumped on every (re)start so a callback that
+-- was already scheduled before a restart can recognize itself as stale. The
+-- timer handle is reused, so `timers[win] == timer` alone cannot detect this.
+---@type table<integer, integer>
+local generations = {}
+
 ---@param timer uv.uv_timer_t|nil
 ---@return nil
 local function stop_timer(timer)
@@ -41,6 +47,7 @@ end
 local function clear_timer(win)
   stop_timer(timers[win])
   timers[win] = nil
+  generations[win] = nil
 end
 
 ---@return nil
@@ -114,7 +121,11 @@ local function update_for_window(win)
   state.set_win_state(win, win_state)
 end
 
----@param opts? Partial<PinwordsCwordRuntimeConfig>
+---@class PinwordsCwordRuntimeSetupOpts
+---@field build_pattern? fun(raw: string): string
+---@field debounce_ms? integer
+
+---@param opts? PinwordsCwordRuntimeSetupOpts
 ---@return nil
 function M.configure(opts)
   if type(opts) ~= "table" then
@@ -172,31 +183,40 @@ function M.handle_cursor_moved(win)
     return
   end
 
-  clear_timer(win)
-
-  local ok, timer = pcall(vim.uv.new_timer)
-  if not ok or not timer then
-    return
+  -- Reuse a single timer per window: stop the pending fire and restart it.
+  -- Avoids the new_timer/close churn on every CursorMoved during debounce.
+  local timer = timers[win]
+  if not timer then
+    local ok, t = pcall(vim.uv.new_timer)
+    if not ok or not t then
+      return
+    end
+    timer = t
+    timers[win] = timer
+  else
+    pcall(function()
+      timer:stop()
+    end)
   end
-  timers[win] = timer
+
+  -- Tag this debounce window. A callback whose generation no longer matches was
+  -- scheduled before a later restart (the reused handle keeps timers[win] ==
+  -- timer), so it must be skipped to avoid an early/duplicate update.
+  local generation = (generations[win] or 0) + 1
+  generations[win] = generation
 
   timer:start(
     config.debounce_ms,
     0,
     vim.schedule_wrap(function()
-      if timers[win] ~= timer then
-        stop_timer(timer)
+      if timers[win] ~= timer or generations[win] ~= generation then
         return
       end
-
-      timers[win] = nil
       if not M.is_enabled(win) then
-        stop_timer(timer)
         return
       end
 
       update_for_window(win)
-      stop_timer(timer)
     end)
   )
 end
@@ -256,6 +276,7 @@ function M.teardown()
   clear_all_timers()
   M.clear_all()
   enabled_wins = {}
+  generations = {}
 end
 
 return M
