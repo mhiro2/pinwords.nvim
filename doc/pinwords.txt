@@ -144,7 +144,8 @@ API                                                             *pinwords-api*
     Clear all pinned words from every slot.
 
   list()                                                     *pinwords.list()*
-    Return all currently pinned slots.
+    Return a deep copy of all currently pinned slots. Mutating the returned
+    table does not affect plugin state.
     Returns: ~
       table<integer, PinwordsSlot>
 

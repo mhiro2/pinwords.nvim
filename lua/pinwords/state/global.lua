@@ -7,6 +7,10 @@ local global_state = {
 
 local sync_pending = false
 
+-- Incremented by teardown so a sync scheduled before teardown becomes a no-op
+-- instead of recreating vim.g.pinwords_global on the next event loop tick.
+local sync_generation = 0
+
 local function do_sync()
   sync_pending = false
   local ok, err = pcall(vim.api.nvim_set_var, "pinwords_global", global_state)
@@ -20,7 +24,14 @@ local function schedule_sync()
     return
   end
   sync_pending = true
-  vim.schedule(do_sync)
+
+  local generation = sync_generation
+  vim.schedule(function()
+    if generation ~= sync_generation then
+      return
+    end
+    do_sync()
+  end)
 end
 
 ---@param list integer[]
@@ -388,6 +399,7 @@ end
 ---Reset global state and remove the vim.g variable.
 ---@return nil
 function M.teardown()
+  sync_generation = sync_generation + 1
   sync_pending = false
   global_state = { slots = {} }
   pcall(vim.api.nvim_del_var, "pinwords_global")

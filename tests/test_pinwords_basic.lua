@@ -67,6 +67,19 @@ T["list returns all active slots"] = function()
   MiniTest.expect.equality(slots[2], nil)
 end
 
+T["list returns a copy detached from internal state"] = function()
+  helpers.setup_buffer({ "foo bar baz" })
+
+  local pinwords = require("pinwords")
+  pinwords.set(1)
+
+  local slots = pinwords.list()
+  slots[1] = nil
+
+  MiniTest.expect.equality(pinwords.list()[1].raw, "foo")
+  MiniTest.expect.equality(helpers.find_match("PinWord1") ~= nil, true)
+end
+
 T["set with invalid slot does nothing"] = function()
   helpers.setup_buffer({ "foo bar", "baz" })
 

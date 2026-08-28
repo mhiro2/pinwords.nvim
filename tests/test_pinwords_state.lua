@@ -39,6 +39,29 @@ T["set_slot stores entry and syncs to global var"] = function()
   MiniTest.expect.equality(global.slots[1].raw, "foo")
 end
 
+T["teardown cancels a pending sync so vim.g is not recreated"] = function()
+  helpers.setup_buffer({ "test" })
+
+  local state = require("pinwords.state")
+  state.clear_all()
+  state.flush_sync()
+
+  state.set_slot(1, {
+    raw = "foo",
+    pattern = "\\V\\c\\<foo\\>",
+    hl_group = "PinWord1",
+    whole_word = true,
+    case_sensitive = false,
+  })
+  state.teardown()
+  MiniTest.expect.equality(vim.g.pinwords_global, nil)
+
+  vim.wait(50, function()
+    return vim.g.pinwords_global ~= nil
+  end)
+  MiniTest.expect.equality(vim.g.pinwords_global, nil)
+end
+
 T["clear_slot removes entry from slots and order"] = function()
   helpers.setup_buffer({ "test" })
 
