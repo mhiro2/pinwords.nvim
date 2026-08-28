@@ -171,6 +171,8 @@ local function build_hl_opts(spec, default_cterm)
   if spec.bg then
     opts.bg = spec.bg
     opts.ctermbg = spec.ctermbg or hex_to_cterm(spec.bg) or default_cterm
+  elseif spec.ctermbg then
+    opts.ctermbg = spec.ctermbg
   end
 
   if spec.fg then

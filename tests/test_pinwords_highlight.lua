@@ -344,4 +344,31 @@ T["highlight preserves user link made after plugin apply"] = function()
   helpers.clear_hl("PinWord1")
 end
 
+T["highlight applies standalone ctermbg"] = function()
+  local highlight = require("pinwords.highlight")
+
+  helpers.clear_hl("PinWord1")
+  highlight.apply(1, { [1] = { ctermbg = 196 } })
+
+  local hl = vim.api.nvim_get_hl(0, { name = "PinWord1", link = false })
+  MiniTest.expect.equality(hl.ctermbg, 196)
+  MiniTest.expect.equality(hl.bg, nil)
+
+  helpers.clear_hl("PinWord1")
+end
+
+T["highlight applies standalone ctermfg and ctermbg"] = function()
+  local highlight = require("pinwords.highlight")
+
+  helpers.clear_hl("PinWord1")
+  highlight.apply(1, { [1] = { ctermbg = 196, ctermfg = 15, bold = true } })
+
+  local hl = vim.api.nvim_get_hl(0, { name = "PinWord1", link = false })
+  MiniTest.expect.equality(hl.ctermbg, 196)
+  MiniTest.expect.equality(hl.ctermfg, 15)
+  MiniTest.expect.equality(hl.bold, true)
+
+  helpers.clear_hl("PinWord1")
+end
+
 return T
