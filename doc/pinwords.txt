@@ -120,7 +120,9 @@ API                                                             *pinwords-api*
       {slot}  (integer|nil) Slot number (1-N). nil for auto allocation.
       {opts}  (table|nil)   Options table:
                 raw           (string|nil)  Explicit text to pin.
-                whole_word    (boolean|nil) Match whole words only.
+                whole_word    (boolean|nil) Match whole words only. Word
+                              boundaries are applied only at ends that are
+                              keyword characters, so `-foo` still matches.
                 case_sensitive (boolean|nil) Case-sensitive matching.
                 source        ("cword"|"symbol"|nil) Use Treesitter symbol.
 

@@ -3,6 +3,8 @@
 --- Provides grep/live_grep across project using pinned words
 ---@brief ]]
 
+local pattern = require("pinwords.pattern")
+
 local M = {}
 
 -- ripgrep regex metacharacters that need escaping
@@ -133,7 +135,15 @@ end
 local function build_rg_term(entry)
   local term = escape_rg(entry.raw)
   if entry.whole_word then
-    term = "\\b" .. term .. "\\b"
+    -- Mirror the highlight pattern: a boundary only where the text ends in a
+    -- keyword character, so `-foo` still matches under whole_word.
+    local left, right = pattern.word_boundaries(entry.raw)
+    if left then
+      term = "\\b" .. term
+    end
+    if right then
+      term = term .. "\\b"
+    end
   end
 
   if not entry.case_sensitive then
@@ -165,7 +175,13 @@ end
 local function build_vim_term(entry)
   local term = escape_vim_literal(entry.raw)
   if entry.whole_word then
-    term = "\\<" .. term .. "\\>"
+    local left, right = pattern.word_boundaries(entry.raw)
+    if left then
+      term = "\\<" .. term
+    end
+    if right then
+      term = term .. "\\>"
+    end
   end
   return (entry.case_sensitive and "\\C" or "\\c") .. term
 end
@@ -302,7 +318,9 @@ end
 
 ---Build the `git grep` argv for a single pinned entry. `-F` keeps the term a
 ---literal so there is no regex-dialect mismatch, while `-w`/`-i` reproduce the
----slot's whole-word and case sensitivity. `-n --column` output matches the
+---slot's whole-word and case sensitivity; `-w` is dropped when the text starts
+---or ends with a non-keyword character because git grep would then require a
+---boundary that can never exist. `-n --column` output matches the
 ---`file:line:col:text` shape that `parse_rg_vimgrep` already understands.
 ---`--untracked --exclude-standard` mirrors ripgrep: search tracked files plus
 ---untracked files that are not gitignored.
@@ -311,7 +329,10 @@ end
 local function build_git_grep_cmd(entry)
   local cmd = { "git", "grep", "--no-color", "-I", "-n", "--column", "--untracked", "--exclude-standard", "-F" }
   if entry.whole_word then
-    cmd[#cmd + 1] = "-w"
+    local left, right = pattern.word_boundaries(entry.raw)
+    if left and right then
+      cmd[#cmd + 1] = "-w"
+    end
   end
   if not entry.case_sensitive then
     cmd[#cmd + 1] = "-i"
