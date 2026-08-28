@@ -71,14 +71,41 @@ local function normal_bg_hex()
   return string.format("#%06x", hl.bg)
 end
 
+---Highlight definitions last written by this module, keyed by group name.
+---Used to distinguish plugin-owned groups (safe to overwrite) from user-defined ones.
+---@type table<string, table>
+local applied = {}
+
+---Returns the group's own definition (links are reported as `link`, not resolved).
+---@param group string
+---@return table|nil
+local function get_hl(group)
+  local ok, hl = pcall(vim.api.nvim_get_hl, 0, { name = group, link = true })
+  if not ok or type(hl) ~= "table" then
+    return nil
+  end
+  return hl
+end
+
+---Returns true when the group is undefined or still holds the definition this
+---module wrote last time; false when the user (or another plugin) defined it.
 ---@param group string
 ---@return boolean
-local function highlight_is_empty(group)
-  local ok, hl = pcall(vim.api.nvim_get_hl, 0, { name = group, link = false })
-  if not ok or type(hl) ~= "table" then
+local function is_plugin_owned(group)
+  local hl = get_hl(group)
+  if not hl or next(hl) == nil then
     return true
   end
-  return next(hl) == nil
+  local prev = applied[group]
+  return prev ~= nil and vim.deep_equal(prev, hl)
+end
+
+---@param group string
+---@param opts table
+---@return nil
+local function set_hl(group, opts)
+  vim.api.nvim_set_hl(0, group, opts)
+  applied[group] = get_hl(group)
 end
 
 ---@param hex string
@@ -144,6 +171,8 @@ local function build_hl_opts(spec, default_cterm)
   if spec.bg then
     opts.bg = spec.bg
     opts.ctermbg = spec.ctermbg or hex_to_cterm(spec.bg) or default_cterm
+  elseif spec.ctermbg then
+    opts.ctermbg = spec.ctermbg
   end
 
   if spec.fg then
@@ -195,7 +224,7 @@ function M.apply(slots, colors)
 
   for i = 1, slots do
     local group = "PinWord" .. i
-    if highlight_is_empty(group) then
+    if is_plugin_owned(group) then
       local user_color = colors[i]
       local spec
 
@@ -208,12 +237,12 @@ function M.apply(slots, colors)
       spec = apply_blend(spec, bg_hex, alpha)
       local default_cterm = default_cterm_palette[i] or 15
       local opts = build_hl_opts(spec, default_cterm)
-      vim.api.nvim_set_hl(0, group, opts)
+      set_hl(group, opts)
     end
   end
 
   local cword_group = "PinWordCword"
-  if highlight_is_empty(cword_group) then
+  if is_plugin_owned(cword_group) then
     local user_cword = colors.cword
     local spec
 
@@ -225,12 +254,12 @@ function M.apply(slots, colors)
 
     spec = apply_blend(spec, bg_hex, alpha)
     local opts = build_hl_opts(spec, default_cword_cterm)
-    vim.api.nvim_set_hl(0, cword_group, opts)
+    set_hl(cword_group, opts)
   end
 
   local flash_group = "PinWordFlash"
-  if highlight_is_empty(flash_group) then
-    vim.api.nvim_set_hl(0, flash_group, { link = "IncSearch" })
+  if is_plugin_owned(flash_group) then
+    set_hl(flash_group, { link = "IncSearch" })
   end
 end
 

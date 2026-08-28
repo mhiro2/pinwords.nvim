@@ -284,4 +284,91 @@ T["highlight uses default for unspecified slots"] = function()
   helpers.clear_hl("PinWord3")
 end
 
+T["highlight updates plugin-defined groups on re-apply"] = function()
+  local highlight = require("pinwords.highlight")
+
+  helpers.clear_hl("PinWord1")
+  highlight.apply(1, { [1] = { bg = "#ff0000", fg = "#ffffff" } })
+  local first = vim.api.nvim_get_hl(0, { name = "PinWord1", link = false })
+  MiniTest.expect.equality(first.bg, 0xff0000)
+
+  highlight.apply(1, { [1] = { bg = "#00ff00", fg = "#ffffff" } })
+  local second = vim.api.nvim_get_hl(0, { name = "PinWord1", link = false })
+  MiniTest.expect.equality(second.bg, 0x00ff00)
+
+  helpers.clear_hl("PinWord1")
+end
+
+T["highlight updates plugin-defined cword on re-apply"] = function()
+  local highlight = require("pinwords.highlight")
+
+  helpers.clear_hl("PinWordCword")
+  highlight.apply(1, { cword = { bg = "#ff0000", fg = "#ffffff" } })
+  highlight.apply(1, { cword = { bg = "#0000ff", fg = "#ffffff" } })
+
+  local hl = vim.api.nvim_get_hl(0, { name = "PinWordCword", link = false })
+  MiniTest.expect.equality(hl.bg, 0x0000ff)
+
+  helpers.clear_hl("PinWordCword")
+end
+
+T["highlight preserves user override made after plugin apply"] = function()
+  local highlight = require("pinwords.highlight")
+
+  helpers.clear_hl("PinWord1")
+  highlight.apply(1, { [1] = { bg = "#ff0000", fg = "#ffffff" } })
+
+  -- User overrides the group after the plugin defined it
+  vim.api.nvim_set_hl(0, "PinWord1", { bg = 0x123456 })
+  highlight.apply(1, { [1] = { bg = "#00ff00", fg = "#ffffff" } })
+
+  local hl = vim.api.nvim_get_hl(0, { name = "PinWord1", link = false })
+  MiniTest.expect.equality(hl.bg, 0x123456)
+
+  helpers.clear_hl("PinWord1")
+end
+
+T["highlight preserves user link made after plugin apply"] = function()
+  local highlight = require("pinwords.highlight")
+
+  helpers.clear_hl("PinWord1")
+  highlight.apply(1, { [1] = { bg = "#ff0000", fg = "#ffffff" } })
+
+  -- User links the group after the plugin defined it
+  vim.api.nvim_set_hl(0, "PinWord1", { link = "IncSearch" })
+  highlight.apply(1, { [1] = { bg = "#00ff00", fg = "#ffffff" } })
+
+  local hl = vim.api.nvim_get_hl(0, { name = "PinWord1", link = true })
+  MiniTest.expect.equality(hl.link, "IncSearch")
+
+  helpers.clear_hl("PinWord1")
+end
+
+T["highlight applies standalone ctermbg"] = function()
+  local highlight = require("pinwords.highlight")
+
+  helpers.clear_hl("PinWord1")
+  highlight.apply(1, { [1] = { ctermbg = 196 } })
+
+  local hl = vim.api.nvim_get_hl(0, { name = "PinWord1", link = false })
+  MiniTest.expect.equality(hl.ctermbg, 196)
+  MiniTest.expect.equality(hl.bg, nil)
+
+  helpers.clear_hl("PinWord1")
+end
+
+T["highlight applies standalone ctermfg and ctermbg"] = function()
+  local highlight = require("pinwords.highlight")
+
+  helpers.clear_hl("PinWord1")
+  highlight.apply(1, { [1] = { ctermbg = 196, ctermfg = 15, bold = true } })
+
+  local hl = vim.api.nvim_get_hl(0, { name = "PinWord1", link = false })
+  MiniTest.expect.equality(hl.ctermbg, 196)
+  MiniTest.expect.equality(hl.ctermfg, 15)
+  MiniTest.expect.equality(hl.bold, true)
+
+  helpers.clear_hl("PinWord1")
+end
+
 return T

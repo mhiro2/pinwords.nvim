@@ -116,7 +116,7 @@ require("pinwords").setup({
 })
 ```
 
-Available style attributes: `bold`, `italic`, `underline`, `undercurl`, `underdouble`, `underdotted`, `underdashed`, `strikethrough`, `sp`, `ctermbg`, `ctermfg`.
+Available style attributes: `bold`, `italic`, `underline`, `undercurl`, `underdouble`, `underdotted`, `underdashed`, `strikethrough`, `sp`, `ctermbg`, `ctermfg` (integers 0–255; estimated from `bg`/`fg` when omitted).
 
 #### Visual Flash Feedback
 
@@ -380,7 +380,9 @@ PinWordCword
 PinWordFlash
 ```
 
-Fully customizable via standard highlight overrides.
+Fully customizable via standard highlight overrides. Groups you define yourself
+(e.g. `vim.api.nvim_set_hl(0, "PinWord1", { ... })`) are preserved; groups defined
+by the plugin are refreshed whenever `setup()` is called again or the colorscheme changes.
 
 ## 📦 Requirements
 

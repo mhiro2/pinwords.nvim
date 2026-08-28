@@ -221,8 +221,10 @@ CUSTOM COLORS                                                  *pinwords-colors*
     underdotted  Dotted underline
     underdashed  Dashed underline
     strikethrough  Strikethrough text
-    ctermbg      Terminal background color (integer, auto-estimated if omitted)
-    ctermfg      Terminal foreground color (integer, auto-estimated if omitted)
+    ctermbg      Terminal background color (integer 0-255; estimated from
+                 bg if omitted)
+    ctermfg      Terminal foreground color (integer 0-255; estimated from
+                 fg if omitted)
 
 JUMP NAVIGATION                                                *pinwords-jump*
 
@@ -246,6 +248,10 @@ HIGHLIGHTS                                                     *pinwords-highlig
   PinWord1 .. PinWord9
   PinWordCword
   PinWordFlash
+
+  Groups you define yourself (e.g. via |nvim_set_hl()|) are preserved. Groups
+  defined by the plugin are refreshed whenever |pinwords.setup()| is called
+  again or the colorscheme changes.
 
 GREP INTEGRATION                                              *pinwords-grep*
 
