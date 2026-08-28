@@ -27,4 +27,31 @@ T["selection handles multibyte byte ranges"] = function()
   MiniTest.expect.equality(selection.get(), "あいう")
 end
 
+T["selection honors exclusive selection"] = function()
+  helpers.setup_buffer({ "abc" })
+  helpers.set_visual_marks(1, 1, 1, 3)
+
+  local saved = vim.o.selection
+  vim.o.selection = "exclusive"
+  local ok, result = pcall(selection.get)
+  vim.o.selection = saved
+
+  MiniTest.expect.equality(ok, true)
+  MiniTest.expect.equality(result, "ab")
+end
+
+T["selection extracts blockwise regions"] = function()
+  helpers.setup_buffer({ "abcde", "fghij" })
+  helpers.feed_normal([[ggl\<C-v>jll\<Esc>]])
+
+  MiniTest.expect.equality(selection.get(), "bcd\nghi")
+end
+
+T["selection extracts linewise regions"] = function()
+  helpers.setup_buffer({ "abcde", "fghij", "klmno" })
+  helpers.feed_normal([[ggVj\<Esc>]])
+
+  MiniTest.expect.equality(selection.get(), "abcde\nfghij")
+end
+
 return T

@@ -88,6 +88,11 @@ function M.set_visual_marks(start_row, start_col, end_row, end_col)
   vim.fn.setpos("'>", { 0, end_row, end_col, 0 })
 end
 
+---@param keys string Vimscript key notation, e.g. [[ggVj\<Esc>]]
+function M.feed_normal(keys)
+  vim.cmd(string.format('execute "normal! %s"', keys))
+end
+
 ---@return integer
 function M.match_count()
   local count = 0
