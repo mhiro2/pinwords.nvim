@@ -2,31 +2,67 @@ local state = require("pinwords.state")
 
 local M = {}
 
+---@class PinwordsJumpGroup
+---@field case_sensitive boolean
+---@field bodies string[]
+
+---Collect the pinned slots to jump through, grouped by case sensitivity.
+---Vim applies `\c`/`\C` to the whole pattern, so slots that differ in case
+---sensitivity cannot share one alternation; everything else is merged so the
+---buffer is scanned at most once per group instead of once per slot.
 ---@param slot? integer
----@return string[]
-local function get_search_patterns(slot)
+---@return PinwordsJumpGroup[]
+local function get_search_groups(slot)
   local slots = state.get_slots()
 
+  local slot_numbers
   if slot then
-    local entry = slots[slot]
-    if type(entry) == "table" and type(entry.pattern) == "string" and entry.pattern ~= "" then
-      return { entry.pattern }
-    end
-    return {}
+    slot_numbers = { slot }
+  else
+    slot_numbers = vim.tbl_keys(slots)
+    table.sort(slot_numbers)
   end
 
-  local slot_numbers = vim.tbl_keys(slots)
-  table.sort(slot_numbers)
-
-  local patterns = {}
+  ---@type table<boolean, string[]>
+  local bodies_by_case = {}
   for _, slot_number in ipairs(slot_numbers) do
     local entry = slots[slot_number]
     if type(entry) == "table" and type(entry.pattern) == "string" and entry.pattern ~= "" then
-      table.insert(patterns, entry.pattern)
+      local case_sensitive = entry.case_sensitive == true
+      local bodies = bodies_by_case[case_sensitive]
+      if not bodies then
+        bodies = {}
+        bodies_by_case[case_sensitive] = bodies
+      end
+      -- Strip the `\V\c` / `\V\C` prefix so bodies can be joined under one prefix.
+      bodies[#bodies + 1] = (entry.pattern:gsub("^\\V\\[cC]", ""))
     end
   end
 
-  return patterns
+  local groups = {}
+  for _, case_sensitive in ipairs({ true, false }) do
+    local bodies = bodies_by_case[case_sensitive]
+    if bodies then
+      groups[#groups + 1] = { case_sensitive = case_sensitive, bodies = bodies }
+    end
+  end
+  return groups
+end
+
+---@param group PinwordsJumpGroup
+---@return string
+local function group_pattern(group)
+  local prefix = group.case_sensitive and "\\V\\C" or "\\V\\c"
+  if #group.bodies == 1 then
+    return prefix .. group.bodies[1]
+  end
+  return prefix .. "\\(" .. table.concat(group.bodies, "\\|") .. "\\)"
+end
+
+---@param slot? integer
+---@return string[]
+local function get_search_patterns(slot)
+  return vim.tbl_map(group_pattern, get_search_groups(slot))
 end
 
 ---@param pos table
@@ -70,29 +106,34 @@ end
 
 ---@param direction "forward"|"backward"
 ---@param patterns string[]
+---@param flags string
+---@return integer[]|nil
+local function find_best_pos(direction, patterns, flags)
+  local best
+  for _, pattern in ipairs(patterns) do
+    local pos = search_pos(pattern, flags)
+    if pos then
+      best = pick_better_pos(pos, best, direction)
+    end
+  end
+  return best
+end
+
+---Find the nearest match without wrapping first; the wrapped search only runs
+---when nothing lies ahead (or behind), so a wrap scan is never paid for while a
+---closer non-wrapped match exists.
+---@param direction "forward"|"backward"
+---@param patterns string[]
 ---@return integer[]|nil
 local function find_next_pos(direction, patterns)
   local no_wrap_flags = direction == "forward" and "nW" or "nbW"
   local wrap_flags = direction == "forward" and "nw" or "nbw"
 
-  local no_wrap_best
-  local wrap_best
-  for _, pattern in ipairs(patterns) do
-    local no_wrap_pos = search_pos(pattern, no_wrap_flags)
-    if no_wrap_pos then
-      no_wrap_best = pick_better_pos(no_wrap_pos, no_wrap_best, direction)
-    else
-      local wrap_pos = search_pos(pattern, wrap_flags)
-      if wrap_pos then
-        wrap_best = pick_better_pos(wrap_pos, wrap_best, direction)
-      end
-    end
+  local pos = find_best_pos(direction, patterns, no_wrap_flags)
+  if pos then
+    return pos
   end
-
-  if no_wrap_best then
-    return no_wrap_best
-  end
-  return wrap_best
+  return find_best_pos(direction, patterns, wrap_flags)
 end
 
 ---@param direction "forward"|"backward"
@@ -114,9 +155,10 @@ local function do_search(direction, patterns, count)
   return found
 end
 
+---@param direction "forward"|"backward"
 ---@param slot? integer
 ---@return boolean success
-function M.next(slot)
+local function jump(direction, slot)
   local patterns = get_search_patterns(slot)
   if #patterns == 0 then
     vim.notify("pinwords: no pinned words to jump to", vim.log.levels.INFO)
@@ -128,7 +170,7 @@ function M.next(slot)
   -- Set mark for jumplist before moving
   vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("m'", true, false, true), "nx", false)
 
-  local found = do_search("forward", patterns, count)
+  local found = do_search(direction, patterns, count)
   if not found then
     vim.notify("pinwords: no more matches", vim.log.levels.INFO)
     return false
@@ -139,25 +181,14 @@ end
 
 ---@param slot? integer
 ---@return boolean success
+function M.next(slot)
+  return jump("forward", slot)
+end
+
+---@param slot? integer
+---@return boolean success
 function M.prev(slot)
-  local patterns = get_search_patterns(slot)
-  if #patterns == 0 then
-    vim.notify("pinwords: no pinned words to jump to", vim.log.levels.INFO)
-    return false
-  end
-
-  local count = vim.v.count1
-
-  -- Set mark for jumplist before moving
-  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("m'", true, false, true), "nx", false)
-
-  local found = do_search("backward", patterns, count)
-  if not found then
-    vim.notify("pinwords: no more matches", vim.log.levels.INFO)
-    return false
-  end
-
-  return true
+  return jump("backward", slot)
 end
 
 return M
