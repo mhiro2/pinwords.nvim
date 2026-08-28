@@ -14,16 +14,47 @@ local RG_META = "[%.%+%*%?%^%$%(%)%[%]%{%}%|\\]"
 ---@field raw string
 ---@field whole_word boolean
 ---@field case_sensitive boolean
+---@field left_boundary boolean
+---@field right_boundary boolean
+
+---ripgrep and `git grep -w` treat letters, digits and `_` as word characters;
+---everything else in ASCII is not. Multibyte characters are left alone because
+---ripgrep's `\b` is Unicode-aware.
+---@param char string
+---@return boolean
+local function is_ascii_non_word(char)
+  return char ~= "" and char:match("^[%p%s]") ~= nil and char ~= "_"
+end
+
+---Recover which ends of the saved pattern carry a word boundary. Reading the
+---pattern instead of recomputing from `iskeyword` keeps grep aligned with the
+---highlight applied at pin time, even when the slot was pinned in a buffer with
+---different `iskeyword` settings.
+---@param entry PinwordsSlot
+---@return boolean left, boolean right
+local function boundaries_from_pattern(entry)
+  if type(entry.pattern) ~= "string" then
+    return pattern.word_boundaries(entry.raw)
+  end
+
+  -- Strip the `\V\c` / `\V\C` prefix; only the boundary markers can produce a
+  -- leading `\<` or trailing `\>` because escape_literal doubles backslashes.
+  local body = entry.pattern:gsub("^\\V\\[cC]", "")
+  return body:sub(1, 2) == "\\<", body:sub(-2) == "\\>"
+end
 
 ---@param entry PinwordsSlot
 ---@return PinwordsGrepEntry
 local function to_grep_entry(entry)
   -- Match semantics are captured on the slot at pin time, so read them
-  -- directly instead of reparsing the saved Vim pattern.
+  -- directly instead of recomputing them against the current buffer.
+  local left, right = boundaries_from_pattern(entry)
   return {
     raw = entry.raw,
     whole_word = entry.whole_word,
     case_sensitive = entry.case_sensitive,
+    left_boundary = entry.whole_word and left,
+    right_boundary = entry.whole_word and right,
   }
 end
 
@@ -134,16 +165,14 @@ end
 ---@return string
 local function build_rg_term(entry)
   local term = escape_rg(entry.raw)
-  if entry.whole_word then
-    -- Mirror the highlight pattern: a boundary only where the text ends in a
-    -- keyword character, so `-foo` still matches under whole_word.
-    local left, right = pattern.word_boundaries(entry.raw)
-    if left then
-      term = "\\b" .. term
-    end
-    if right then
-      term = term .. "\\b"
-    end
+  -- Mirror the highlight pattern, but skip a `\b` that ripgrep could never
+  -- satisfy because the endpoint is not a word character for ripgrep (possible
+  -- when `iskeyword` was widened in the pinned buffer).
+  if entry.left_boundary and not is_ascii_non_word(entry.raw:sub(1, 1)) then
+    term = "\\b" .. term
+  end
+  if entry.right_boundary and not is_ascii_non_word(entry.raw:sub(-1)) then
+    term = term .. "\\b"
   end
 
   if not entry.case_sensitive then
@@ -174,14 +203,11 @@ end
 ---@return string
 local function build_vim_term(entry)
   local term = escape_vim_literal(entry.raw)
-  if entry.whole_word then
-    local left, right = pattern.word_boundaries(entry.raw)
-    if left then
-      term = "\\<" .. term
-    end
-    if right then
-      term = term .. "\\>"
-    end
+  if entry.left_boundary then
+    term = "\\<" .. term
+  end
+  if entry.right_boundary then
+    term = term .. "\\>"
   end
   return (entry.case_sensitive and "\\C" or "\\c") .. term
 end
@@ -316,23 +342,32 @@ local function inside_git_repo()
   return vim.fs.root(cwd, ".git") ~= nil
 end
 
+---True when `git grep -w` reproduces the entry's boundaries exactly: `-w`
+---requires a boundary on both ends, so it fits only when both ends need one and
+---both are word characters for git.
+---@param entry PinwordsGrepEntry
+---@return boolean
+local function git_grep_can_use_word_flag(entry)
+  return entry.left_boundary
+    and entry.right_boundary
+    and not is_ascii_non_word(entry.raw:sub(1, 1))
+    and not is_ascii_non_word(entry.raw:sub(-1))
+end
+
 ---Build the `git grep` argv for a single pinned entry. `-F` keeps the term a
 ---literal so there is no regex-dialect mismatch, while `-w`/`-i` reproduce the
----slot's whole-word and case sensitivity; `-w` is dropped when the text starts
----or ends with a non-keyword character because git grep would then require a
----boundary that can never exist. `-n --column` output matches the
----`file:line:col:text` shape that `parse_rg_vimgrep` already understands.
----`--untracked --exclude-standard` mirrors ripgrep: search tracked files plus
----untracked files that are not gitignored.
+---slot's whole-word and case sensitivity. `-w` is used only when it matches the
+---entry's boundaries exactly; one-sided boundaries are enforced afterwards by
+---`filter_items_by_boundaries`, since `-w` cannot express them. `-n --column`
+---output matches the `file:line:col:text` shape that `parse_rg_vimgrep` already
+---understands. `--untracked --exclude-standard` mirrors ripgrep: search tracked
+---files plus untracked files that are not gitignored.
 ---@param entry PinwordsGrepEntry
 ---@return string[]
 local function build_git_grep_cmd(entry)
   local cmd = { "git", "grep", "--no-color", "-I", "-n", "--column", "--untracked", "--exclude-standard", "-F" }
-  if entry.whole_word then
-    local left, right = pattern.word_boundaries(entry.raw)
-    if left and right then
-      cmd[#cmd + 1] = "-w"
-    end
+  if git_grep_can_use_word_flag(entry) then
+    cmd[#cmd + 1] = "-w"
   end
   if not entry.case_sensitive then
     cmd[#cmd + 1] = "-i"
@@ -340,6 +375,66 @@ local function build_git_grep_cmd(entry)
   cmd[#cmd + 1] = "-e"
   cmd[#cmd + 1] = entry.raw
   return cmd
+end
+
+---@param text string
+---@param start_index integer
+---@param length integer
+---@param entry PinwordsGrepEntry
+---@return boolean
+local function occurrence_has_boundaries(text, start_index, length, entry)
+  if entry.left_boundary and start_index > 1 then
+    if not is_ascii_non_word(text:sub(start_index - 1, start_index - 1)) then
+      return false
+    end
+  end
+
+  if entry.right_boundary then
+    local after = start_index + length
+    if after <= #text and not is_ascii_non_word(text:sub(after, after)) then
+      return false
+    end
+  end
+
+  return true
+end
+
+---Enforce boundaries that `git grep -w` could not express. Every occurrence on
+---the line is checked, and the reported column moves to the first one that
+---satisfies the entry's boundaries; lines without such an occurrence are
+---dropped.
+---@param entry PinwordsGrepEntry
+---@param items vim.quickfix.entry[]
+---@return vim.quickfix.entry[]
+local function filter_items_by_boundaries(entry, items)
+  if git_grep_can_use_word_flag(entry) then
+    return items
+  end
+  if not entry.left_boundary and not entry.right_boundary then
+    return items
+  end
+
+  local needle = entry.case_sensitive and entry.raw or entry.raw:lower()
+  local out = {}
+
+  for _, item in ipairs(items) do
+    local text = entry.case_sensitive and item.text or item.text:lower()
+    local from = 1
+    while true do
+      local start_index = text:find(needle, from, true)
+      if not start_index then
+        break
+      end
+      if occurrence_has_boundaries(text, start_index, #needle, entry) then
+        item.col = start_index
+        out[#out + 1] = item
+        break
+      end
+      from = start_index + 1
+    end
+  end
+
+  return out
 end
 
 ---Sort quickfix items by location and drop exact duplicates so overlapping
@@ -393,7 +488,8 @@ local function try_git_grep_fallback(entries)
     vim.system(build_git_grep_cmd(entry), { text = true }, function(result)
       vim.schedule(function()
         if result.code == 0 then
-          for _, item in ipairs(parse_rg_vimgrep(result.stdout or "")) do
+          local parsed = filter_items_by_boundaries(entry, parse_rg_vimgrep(result.stdout or ""))
+          for _, item in ipairs(parsed) do
             items[#items + 1] = item
           end
         elseif result.code ~= 1 then

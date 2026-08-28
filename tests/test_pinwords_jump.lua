@@ -318,4 +318,22 @@ T["jump_next visits merged slots in buffer order with whole-word bodies"] = func
   MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), { 1, 4 })
 end
 
+T["jump_next still works when pinned text is too long for one pattern"] = function()
+  local long_a = string.rep("a", 3000)
+  local long_b = string.rep("b", 3000)
+  helpers.setup_buffer({ long_a, long_b })
+
+  local pinwords = require("pinwords")
+  pinwords.setup({ slots = 9 })
+  pinwords.set(1, { raw = long_a, whole_word = false })
+  pinwords.set(2, { raw = long_b, whole_word = false })
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
+
+  MiniTest.expect.equality(pinwords.jump_next(), true)
+  MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), { 2, 0 })
+
+  MiniTest.expect.equality(pinwords.jump_next(), true)
+  MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), { 1, 0 })
+end
+
 return T

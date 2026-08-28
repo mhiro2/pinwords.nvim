@@ -49,20 +49,56 @@ local function get_search_groups(slot)
   return groups
 end
 
----@param group PinwordsJumpGroup
+-- Upper bound on a joined pattern so long pinned strings cannot push the
+-- alternation past Vim's pattern length limit (E339). A group that exceeds it
+-- is split into several patterns, which still beats one search per slot.
+local MAX_PATTERN_BYTES = 4096
+
+---@param prefix string
+---@param bodies string[]
 ---@return string
-local function group_pattern(group)
-  local prefix = group.case_sensitive and "\\V\\C" or "\\V\\c"
-  if #group.bodies == 1 then
-    return prefix .. group.bodies[1]
+local function join_bodies(prefix, bodies)
+  if #bodies == 1 then
+    return prefix .. bodies[1]
   end
-  return prefix .. "\\(" .. table.concat(group.bodies, "\\|") .. "\\)"
+  return prefix .. "\\(" .. table.concat(bodies, "\\|") .. "\\)"
+end
+
+---Turn one group into as few patterns as the length limit allows.
+---@param group PinwordsJumpGroup
+---@return string[]
+local function group_patterns(group)
+  local prefix = group.case_sensitive and "\\V\\C" or "\\V\\c"
+
+  local patterns = {}
+  local chunk = {}
+  local chunk_bytes = 0
+
+  for _, body in ipairs(group.bodies) do
+    -- +2 covers the "\|" separator each additional body needs.
+    if #chunk > 0 and chunk_bytes + #body + 2 > MAX_PATTERN_BYTES then
+      patterns[#patterns + 1] = join_bodies(prefix, chunk)
+      chunk = {}
+      chunk_bytes = 0
+    end
+    chunk[#chunk + 1] = body
+    chunk_bytes = chunk_bytes + #body + 2
+  end
+
+  if #chunk > 0 then
+    patterns[#patterns + 1] = join_bodies(prefix, chunk)
+  end
+  return patterns
 end
 
 ---@param slot? integer
 ---@return string[]
 local function get_search_patterns(slot)
-  return vim.tbl_map(group_pattern, get_search_groups(slot))
+  local patterns = {}
+  for _, group in ipairs(get_search_groups(slot)) do
+    vim.list_extend(patterns, group_patterns(group))
+  end
+  return patterns
 end
 
 ---@param pos table
