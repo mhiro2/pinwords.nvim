@@ -894,7 +894,7 @@ T["grep drops backend boundaries at non-ASCII endpoints"] = function()
     },
   }
 
-  MiniTest.expect.equality(grep.build_rg_pattern(slots, nil), "\228\184\128foo\228\184\128")
+  MiniTest.expect.equality(grep.build_rg_pattern(slots, nil), "\\b\228\184\128foo\228\184\128\\b")
   MiniTest.expect.equality(grep.build_vim_pattern(slots, nil), "\\V\\C\\<\228\184\128foo\228\184\128\\>")
 end
 
@@ -960,6 +960,66 @@ T["git grep results are verified even when -w was used"] = function()
   MiniTest.expect.equality(vim.tbl_contains(captured.argvs[1], "-w"), true)
   MiniTest.expect.equality(#captured.what.items, 1)
   MiniTest.expect.equality(captured.what.items[1].filename, "lua/a.lua")
+end
+
+T["ripgrep fallback results are verified against slot boundaries"] = function()
+  -- Pinned where `-` was a keyword character, so the saved pattern has a left
+  -- boundary that ripgrep's \\b cannot enforce next to `-`.
+  local slots = {
+    [1] = {
+      raw = "-foo",
+      pattern = "\\V\\C\\<-foo\\>",
+      hl_group = "PinWord1",
+      whole_word = true,
+      case_sensitive = true,
+    },
+  }
+
+  local captured = {}
+  local stdout = table.concat({
+    "lua/a.lua:1:3:x -foo y",
+    "lua/b.lua:2:1:y-foo",
+  }, "\n") .. "\n"
+
+  local orig_executable = vim.fn.executable
+  local orig_system = vim.system
+  local orig_schedule = vim.schedule
+  local orig_setqflist = vim.fn.setqflist
+  local orig_nvim_cmd = vim.api.nvim_cmd
+
+  vim.fn.executable = function(bin)
+    return bin == "rg" and 1 or 0
+  end
+  vim.system = function(argv, _opts, on_exit)
+    captured.argv = argv
+    if on_exit then
+      on_exit({ code = 0, stdout = stdout, stderr = "" })
+    end
+    return {}
+  end
+  vim.schedule = function(fn)
+    fn()
+  end
+  vim.fn.setqflist = function(_list, _action, what)
+    captured.what = what
+  end
+  vim.api.nvim_cmd = function(_cmd, _opts) end
+
+  local ok = pcall(function()
+    grep._fallback_grep(slots, nil)
+  end)
+
+  vim.fn.executable = orig_executable
+  vim.system = orig_system
+  vim.schedule = orig_schedule
+  vim.fn.setqflist = orig_setqflist
+  vim.api.nvim_cmd = orig_nvim_cmd
+
+  MiniTest.expect.equality(ok, true)
+  MiniTest.expect.equality(captured.argv[#captured.argv], "-foo\\b")
+  MiniTest.expect.equality(#captured.what.items, 1)
+  MiniTest.expect.equality(captured.what.items[1].filename, "lua/a.lua")
+  MiniTest.expect.equality(captured.what.items[1].col, 3)
 end
 
 return T
