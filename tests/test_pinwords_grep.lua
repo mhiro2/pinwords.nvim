@@ -898,7 +898,7 @@ T["grep drops backend boundaries at non-ASCII endpoints"] = function()
   MiniTest.expect.equality(grep.build_vim_pattern(slots, nil), "\\V\\C\\<\228\184\128foo\228\184\128\\>")
 end
 
-T["git grep results are verified even when -w was used"] = function()
+T["git grep results are verified with the slot pattern even when -w was used"] = function()
   local slots = {
     [1] = {
       raw = "foo",
@@ -910,11 +910,11 @@ T["git grep results are verified even when -w was used"] = function()
   }
 
   local captured = { argvs = {} }
-  -- git grep -w treats the multibyte prefix as a word separator, but \k does
-  -- not, so that line must not survive.
+  -- The second line could only come back from a stale or looser backend match;
+  -- verification with `\V\C\<foo\>` drops it.
   local stdout = table.concat({
     "lua/a.lua:1:1:foo bar",
-    "lua/b.lua:2:1:\228\184\128foo",
+    "lua/b.lua:2:1:xfoo bar",
   }, "\n") .. "\n"
 
   local orig_executable = vim.fn.executable
@@ -962,13 +962,11 @@ T["git grep results are verified even when -w was used"] = function()
   MiniTest.expect.equality(captured.what.items[1].filename, "lua/a.lua")
 end
 
-T["ripgrep fallback results are verified against slot boundaries"] = function()
-  -- Pinned where `-` was a keyword character, so the saved pattern has a left
-  -- boundary that ripgrep's \\b cannot enforce next to `-`.
+T["ripgrep fallback results are verified against the slot pattern"] = function()
   local slots = {
     [1] = {
-      raw = "-foo",
-      pattern = "\\V\\C\\<-foo\\>",
+      raw = "foo",
+      pattern = "\\V\\C\\<foo\\>",
       hl_group = "PinWord1",
       whole_word = true,
       case_sensitive = true,
@@ -977,8 +975,8 @@ T["ripgrep fallback results are verified against slot boundaries"] = function()
 
   local captured = {}
   local stdout = table.concat({
-    "lua/a.lua:1:3:x -foo y",
-    "lua/b.lua:2:1:y-foo",
+    "lua/a.lua:1:3:x foo y",
+    "lua/b.lua:2:1:xfoo y",
   }, "\n") .. "\n"
 
   local orig_executable = vim.fn.executable
@@ -1016,10 +1014,79 @@ T["ripgrep fallback results are verified against slot boundaries"] = function()
   vim.api.nvim_cmd = orig_nvim_cmd
 
   MiniTest.expect.equality(ok, true)
-  MiniTest.expect.equality(captured.argv[#captured.argv], "-foo\\b")
+  MiniTest.expect.equality(captured.argv[#captured.argv], "\\bfoo\\b")
   MiniTest.expect.equality(#captured.what.items, 1)
   MiniTest.expect.equality(captured.what.items[1].filename, "lua/a.lua")
   MiniTest.expect.equality(captured.what.items[1].col, 3)
+end
+
+T["verification keeps multibyte neighbours and case-folded matches, in order"] = function()
+  local slots = {
+    -- Whole-word slot whose results sit next to multibyte punctuation.
+    [1] = {
+      raw = "foo",
+      pattern = "\\V\\C\\<foo\\>",
+      hl_group = "PinWord1",
+      whole_word = true,
+      case_sensitive = true,
+    },
+    -- Case-insensitive slot with a non-ASCII letter.
+    [2] = {
+      raw = "\195\132",
+      pattern = "\\V\\c\195\132",
+      hl_group = "PinWord2",
+      whole_word = false,
+      case_sensitive = false,
+    },
+  }
+
+  local captured = {}
+  local stdout = table.concat({
+    "lua/z.lua:5:2:\227\128\140foo\227\128\141",
+    "lua/a.lua:1:1:\195\164 lower",
+    "lua/b.lua:2:1:xfoo",
+  }, "\n") .. "\n"
+
+  local orig_executable = vim.fn.executable
+  local orig_system = vim.system
+  local orig_schedule = vim.schedule
+  local orig_setqflist = vim.fn.setqflist
+  local orig_nvim_cmd = vim.api.nvim_cmd
+
+  vim.fn.executable = function(bin)
+    return bin == "rg" and 1 or 0
+  end
+  vim.system = function(_argv, _opts, on_exit)
+    if on_exit then
+      on_exit({ code = 0, stdout = stdout, stderr = "" })
+    end
+    return {}
+  end
+  vim.schedule = function(fn)
+    fn()
+  end
+  vim.fn.setqflist = function(_list, _action, what)
+    captured.what = what
+  end
+  vim.api.nvim_cmd = function(_cmd, _opts) end
+
+  local ok = pcall(function()
+    grep._fallback_grep(slots, nil)
+  end)
+
+  vim.fn.executable = orig_executable
+  vim.system = orig_system
+  vim.schedule = orig_schedule
+  vim.fn.setqflist = orig_setqflist
+  vim.api.nvim_cmd = orig_nvim_cmd
+
+  MiniTest.expect.equality(ok, true)
+
+  local items = captured.what.items
+  MiniTest.expect.equality(#items, 2)
+  -- ripgrep's output order is preserved rather than reordered per slot.
+  MiniTest.expect.equality(items[1].filename, "lua/z.lua")
+  MiniTest.expect.equality(items[2].filename, "lua/a.lua")
 end
 
 return T

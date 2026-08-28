@@ -14,6 +14,7 @@ local RG_META = "[%.%+%*%?%^%$%(%)%[%]%{%}%|\\]"
 ---@field raw string
 ---@field whole_word boolean
 ---@field case_sensitive boolean
+---@field pattern string
 ---@field left_boundary boolean
 ---@field right_boundary boolean
 
@@ -34,16 +35,6 @@ end
 ---@param char string
 ---@return boolean
 local function is_rg_word_char(char)
-  return char ~= "" and (char:match("^[%p%s]") == nil or char == "_")
-end
-
----Vim's `\k` covers multibyte letters as well, so treat every byte that is not
----ASCII punctuation or whitespace as part of a word when verifying boundaries
----in backend results. This keeps the verification aligned with the highlight
----rather than with git grep's ASCII-only notion of a word.
----@param char string
----@return boolean
-local function is_keyword_char(char)
   return char ~= "" and (char:match("^[%p%s]") == nil or char == "_")
 end
 
@@ -70,6 +61,7 @@ local function to_grep_entry(entry)
     raw = entry.raw,
     whole_word = entry.whole_word,
     case_sensitive = entry.case_sensitive,
+    pattern = entry.pattern,
     left_boundary = entry.whole_word and left,
     right_boundary = entry.whole_word and right,
   }
@@ -276,59 +268,69 @@ local function open_quickfix(title, items)
   vim.api.nvim_cmd({ cmd = "copen" }, {})
 end
 
----@param text string
----@param start_index integer
----@param length integer
+---Verify a backend result line with the slot's own Vim pattern. Backend flags
+---are only a pre-filter: `git grep -w` cannot express one-sided boundaries and
+---judges words by ASCII alone, and a ripgrep `\b` is omitted where ripgrep could
+---not satisfy it. Reusing the saved pattern makes the check exact for multibyte
+---text, `iskeyword`, and case folding, because it is the very pattern the
+---highlight uses.
 ---@param entry PinwordsGrepEntry
----@return boolean
-local function occurrence_has_boundaries(text, start_index, length, entry)
-  if entry.left_boundary and start_index > 1 then
-    if is_keyword_char(text:sub(start_index - 1, start_index - 1)) then
-      return false
-    end
+---@return vim.regex|nil
+local function entry_regex(entry)
+  if type(entry.pattern) ~= "string" then
+    return nil
   end
-
-  if entry.right_boundary then
-    local after = start_index + length
-    if after <= #text and is_keyword_char(text:sub(after, after)) then
-      return false
-    end
+  local ok, regex = pcall(vim.regex, entry.pattern)
+  if not ok then
+    return nil
   end
-
-  return true
+  return regex
 end
 
----Verify the entry's boundaries on backend results. Backend flags are only a
----pre-filter: `git grep -w` cannot express one-sided boundaries and judges words
----by ASCII alone, and a ripgrep `\b` is omitted where ripgrep could not satisfy
----it. Every occurrence on the line is checked and the reported column moves to
----the first one that satisfies the boundaries; lines without such an occurrence
----are dropped.
----@param entry PinwordsGrepEntry
+---@param entries PinwordsGrepEntry[]
+---@return boolean
+local function entries_need_verification(entries)
+  for _, entry in ipairs(entries) do
+    if entry.left_boundary or entry.right_boundary then
+      return true
+    end
+  end
+  return false
+end
+
+---Keep the result lines that at least one pinned entry really matches, moving
+---the reported column to that match. Results are visited in backend order, so
+---the original ordering is preserved.
+---@param entries PinwordsGrepEntry[]
 ---@param items vim.quickfix.entry[]
 ---@return vim.quickfix.entry[]
-local function filter_items_by_boundaries(entry, items)
-  if not entry.left_boundary and not entry.right_boundary then
+local function verify_items(entries, items)
+  if not entries_need_verification(entries) then
     return items
   end
 
-  local needle = entry.case_sensitive and entry.raw or entry.raw:lower()
-  local out = {}
+  local regexes = {}
+  for _, entry in ipairs(entries) do
+    local regex = entry_regex(entry)
+    -- Skip verification unless every pattern is usable here. A pattern that
+    -- cannot match even its own raw text is unsatisfiable in this buffer -- it
+    -- was pinned where `iskeyword` was wider -- so verifying against it would
+    -- drop every result instead of narrowing them.
+    if not regex or not regex:match_str(entry.raw) then
+      return items
+    end
+    regexes[#regexes + 1] = regex
+  end
 
+  local out = {}
   for _, item in ipairs(items) do
-    local text = entry.case_sensitive and item.text or item.text:lower()
-    local from = 1
-    while true do
-      local start_index = text:find(needle, from, true)
-      if not start_index then
-        break
-      end
-      if occurrence_has_boundaries(text, start_index, #needle, entry) then
-        item.col = start_index
+    for _, regex in ipairs(regexes) do
+      local match_start = regex:match_str(item.text)
+      if match_start then
+        item.col = match_start + 1
         out[#out + 1] = item
         break
       end
-      from = start_index + 1
     end
   end
 
@@ -359,28 +361,6 @@ local function sort_and_dedup_items(items)
       out[#out + 1] = item
     end
   end
-  return out
-end
-
----Verify boundaries for a combined multi-entry search: a line survives when any
----pinned entry has an occurrence on it that satisfies that entry's boundaries.
----@param entries PinwordsGrepEntry[]
----@param items vim.quickfix.entry[]
----@return vim.quickfix.entry[]
-local function filter_items_for_entries(entries, items)
-  local out = {}
-  local seen = {}
-
-  for _, entry in ipairs(entries) do
-    for _, item in ipairs(filter_items_by_boundaries(entry, vim.deepcopy(items))) do
-      local key = ("%s:%d:%d"):format(item.filename, item.lnum, item.col)
-      if not seen[key] then
-        seen[key] = true
-        out[#out + 1] = item
-      end
-    end
-  end
-
   return out
 end
 
@@ -424,7 +404,7 @@ local function handle_rg_result(result, entries)
 
   -- ripgrep may return lines that satisfy the pattern but not the slot's word
   -- boundaries, e.g. when a `\b` had to be omitted as unsatisfiable.
-  local items = filter_items_for_entries(entries, parse_rg_vimgrep(result.stdout or ""))
+  local items = verify_items(entries, parse_rg_vimgrep(result.stdout or ""))
   if #items == 0 then
     vim.notify("pinwords: grep found no matches", vim.log.levels.INFO)
     return
@@ -486,7 +466,7 @@ end
 ---literal so there is no regex-dialect mismatch, while `-w`/`-i` reproduce the
 ---slot's whole-word and case sensitivity. `-w` is used only when it matches the
 ---entry's boundaries exactly; one-sided boundaries are enforced afterwards by
----`filter_items_by_boundaries`, since `-w` cannot express them. `-n --column`
+---`verify_items`, since `-w` cannot express them. `-n --column`
 ---output matches the `file:line:col:text` shape that `parse_rg_vimgrep` already
 ---understands. `--untracked --exclude-standard` mirrors ripgrep: search tracked
 ---files plus untracked files that are not gitignored.
@@ -529,7 +509,7 @@ local function try_git_grep_fallback(entries)
     vim.system(build_git_grep_cmd(entry), { text = true }, function(result)
       vim.schedule(function()
         if result.code == 0 then
-          local parsed = filter_items_by_boundaries(entry, parse_rg_vimgrep(result.stdout or ""))
+          local parsed = verify_items({ entry }, parse_rg_vimgrep(result.stdout or ""))
           for _, item in ipairs(parsed) do
             items[#items + 1] = item
           end
