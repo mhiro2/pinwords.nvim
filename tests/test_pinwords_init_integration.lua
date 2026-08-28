@@ -197,7 +197,7 @@ T["setup with invalid config falls back to defaults"] = function()
     MiniTest.expect.equality(next(slots), nil)
 
     pinwords.set(1)
-    MiniTest.expect.equality(slots[1].raw, "foo")
+    MiniTest.expect.equality(pinwords.list()[1].raw, "foo")
   end)
 end
 
@@ -221,7 +221,7 @@ T["setup with invalid auto_allocation falls back to defaults"] = function()
     MiniTest.expect.equality(next(slots), nil)
 
     pinwords.set()
-    MiniTest.expect.equality(slots[1].raw, "foo")
+    MiniTest.expect.equality(pinwords.list()[1].raw, "foo")
   end)
 end
 

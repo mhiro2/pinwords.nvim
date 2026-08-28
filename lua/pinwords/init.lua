@@ -380,11 +380,11 @@ function M.clear_all()
   matcher.clear_all_globally()
 end
 
----Return all currently pinned slots.
+---Return a deep copy of all currently pinned slots.
 ---@return table<integer, PinwordsSlot>
 function M.list()
   ensure_modules()
-  return state.get_slots()
+  return vim.deepcopy(state.get_slots())
 end
 
 ---Return a deep copy of the current configuration.
