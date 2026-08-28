@@ -242,7 +242,7 @@ The second argument to `set()` accepts a table with the following fields:
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `raw` | `string` | word under cursor | Explicit text to pin (bypasses `<cword>`). |
-| `whole_word` | `boolean` | config value | Match whole words only (`\<...\>`). |
+| `whole_word` | `boolean` | config value | Match whole words only. Word boundaries (`\<`/`\>`) are added only where the text starts/ends with a keyword character, so `-foo` still matches. |
 | `case_sensitive` | `boolean` | config value | Case-sensitive matching. |
 | `source` | `"cword"\|"symbol"` | `"cword"` | Use Treesitter symbol instead of `<cword>`. |
 

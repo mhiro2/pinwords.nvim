@@ -131,6 +131,19 @@ T["build_rg_pattern preserves per-slot match semantics"] = function()
   MiniTest.expect.equality(result, "Foo|(?i:\\bbar\\b)")
 end
 
+T["build_rg_pattern only adds word boundaries next to keyword characters"] = function()
+  local slots = {
+    [1] = slot_entry(1, "-foo", "\\V\\C-foo\\>"),
+    [2] = slot_entry(2, "foo-", "\\V\\C\\<foo-"),
+    [3] = slot_entry(3, "--", "\\V\\C--"),
+  }
+  slots[1].whole_word = true
+  slots[2].whole_word = true
+  slots[3].whole_word = true
+  local result = grep.build_rg_pattern(slots, nil)
+  MiniTest.expect.equality(result, "-foo\\b|\\bfoo-|--")
+end
+
 -- ==========================================================================
 -- build_vim_pattern
 -- ==========================================================================
@@ -173,6 +186,15 @@ T["build_vim_pattern preserves mixed slot semantics"] = function()
   }
   local result = grep.build_vim_pattern(slots, nil)
   MiniTest.expect.equality(result, "\\V\\(\\CFoo\\|\\c\\<bar\\>\\)")
+end
+
+T["build_vim_pattern only adds word boundaries next to keyword characters"] = function()
+  local slots = {
+    [1] = slot_entry(1, "-foo", "\\V\\C-foo\\>"),
+  }
+  slots[1].whole_word = true
+  local result = grep.build_vim_pattern(slots, nil)
+  MiniTest.expect.equality(result, "\\V\\C-foo\\>")
 end
 
 -- ==========================================================================

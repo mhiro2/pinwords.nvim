@@ -66,4 +66,22 @@ T["pattern escapes newlines in multi-line text"] = function()
   MiniTest.expect.equality(match.pattern:match("\\n") ~= nil, true)
 end
 
+T["whole_word keeps matching text that starts or ends with a symbol"] = function()
+  helpers.setup_buffer({ "x -foo y foo- z", "foobar" })
+
+  local pinwords = require("pinwords")
+  pinwords.set(1, { raw = "-foo", whole_word = true })
+  pinwords.set(2, { raw = "foo-", whole_word = true })
+
+  local m1 = helpers.find_match("PinWord1")
+  MiniTest.expect.equality(m1.pattern, "\\V\\c-foo\\>")
+  MiniTest.expect.equality(vim.fn.match("x -foo y", m1.pattern), 2)
+  MiniTest.expect.equality(vim.fn.match("-foobar", m1.pattern), -1)
+
+  local m2 = helpers.find_match("PinWord2")
+  MiniTest.expect.equality(m2.pattern, "\\V\\c\\<foo-")
+  MiniTest.expect.equality(vim.fn.match("y foo- z", m2.pattern), 2)
+  MiniTest.expect.equality(vim.fn.match("xfoo-", m2.pattern), -1)
+end
+
 return T
