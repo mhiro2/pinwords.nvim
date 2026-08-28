@@ -247,6 +247,10 @@ HIGHLIGHTS                                                     *pinwords-highlig
   PinWordCword
   PinWordFlash
 
+  Groups you define yourself (e.g. via |nvim_set_hl()|) are preserved. Groups
+  defined by the plugin are refreshed whenever |pinwords.setup()| is called
+  again or the colorscheme changes.
+
 GREP INTEGRATION                                              *pinwords-grep*
 
   Search your entire project using pinned words. All pinned words are combined
