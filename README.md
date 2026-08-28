@@ -116,7 +116,7 @@ require("pinwords").setup({
 })
 ```
 
-Available style attributes: `bold`, `italic`, `underline`, `undercurl`, `underdouble`, `underdotted`, `underdashed`, `strikethrough`, `sp`, `ctermbg`, `ctermfg`.
+Available style attributes: `bold`, `italic`, `underline`, `undercurl`, `underdouble`, `underdotted`, `underdashed`, `strikethrough`, `sp`, `ctermbg`, `ctermfg` (integers 0–255; estimated from `bg`/`fg` when omitted).
 
 #### Visual Flash Feedback
 

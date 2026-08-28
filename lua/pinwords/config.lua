@@ -46,6 +46,45 @@ local function is_valid_hex(hex)
   return type(hex) == "string" and hex:match("^#%x%x%x%x%x%x$") ~= nil
 end
 
+local style_attributes = {
+  "bold",
+  "italic",
+  "underline",
+  "undercurl",
+  "underdouble",
+  "underdotted",
+  "underdashed",
+  "strikethrough",
+}
+
+---@param value any
+---@return boolean
+local function is_cterm_color(value)
+  return type(value) == "number" and value % 1 == 0 and value >= 0 and value <= 255
+end
+
+---Returns an error message for the first invalid field of a color spec table, or nil.
+---@param value table
+---@return string|nil
+local function color_spec_error(value)
+  for _, field in ipairs({ "bg", "fg", "sp" }) do
+    if value[field] ~= nil and not is_valid_hex(value[field]) then
+      return field .. " must be a valid hex color"
+    end
+  end
+  for _, attr in ipairs(style_attributes) do
+    if value[attr] ~= nil and type(value[attr]) ~= "boolean" then
+      return attr .. " must be a boolean"
+    end
+  end
+  for _, field in ipairs({ "ctermbg", "ctermfg" }) do
+    if value[field] ~= nil and not is_cterm_color(value[field]) then
+      return field .. " must be an integer between 0 and 255"
+    end
+  end
+  return nil
+end
+
 ---@param value any
 ---@param slot_name string
 ---@param warn fun(msg: string)
@@ -60,16 +99,9 @@ local function validate_color(value, slot_name, warn)
   end
 
   if type(value) == "table" then
-    if value.bg ~= nil and not is_valid_hex(value.bg) then
-      warn(slot_name .. ".bg must be a valid hex color; ignoring")
-      return nil
-    end
-    if value.fg ~= nil and not is_valid_hex(value.fg) then
-      warn(slot_name .. ".fg must be a valid hex color; ignoring")
-      return nil
-    end
-    if value.sp ~= nil and not is_valid_hex(value.sp) then
-      warn(slot_name .. ".sp must be a valid hex color; ignoring")
+    local err = color_spec_error(value)
+    if err then
+      warn(slot_name .. "." .. err .. "; ignoring")
       return nil
     end
     return value
@@ -168,14 +200,9 @@ local function validate_colors(errors, colors)
         add_error(errors, "colors entries must use #RRGGBB when string")
       end
     elseif type(value) == "table" then
-      if value.bg ~= nil and not is_valid_hex(value.bg) then
-        add_error(errors, "colors entry bg must be #RRGGBB")
-      end
-      if value.fg ~= nil and not is_valid_hex(value.fg) then
-        add_error(errors, "colors entry fg must be #RRGGBB")
-      end
-      if value.sp ~= nil and not is_valid_hex(value.sp) then
-        add_error(errors, "colors entry sp must be #RRGGBB")
+      local err = color_spec_error(value)
+      if err then
+        add_error(errors, "colors entry " .. err)
       end
     else
       add_error(errors, "colors entries must be string or table")

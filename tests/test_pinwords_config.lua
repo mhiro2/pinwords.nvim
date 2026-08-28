@@ -268,6 +268,81 @@ T["setup validates cword color"] = function()
   helpers.clear_hl("PinWordCword")
 end
 
+local function setup_capturing_warnings(opts)
+  local pinwords = require("pinwords")
+  local notified = {}
+  local orig_notify = vim.notify
+  vim.notify = function(msg, level, _opts)
+    table.insert(notified, { msg = msg, level = level })
+  end
+  local ok = pcall(pinwords.setup, opts)
+  vim.notify = orig_notify
+  MiniTest.expect.equality(ok, true)
+  return notified
+end
+
+local function notified_matches(notified, pattern)
+  for _, n in ipairs(notified) do
+    if n.msg:match(pattern) then
+      return true
+    end
+  end
+  return false
+end
+
+T["setup warns on non-boolean style attribute"] = function()
+  helpers.clear_hl("PinWord1")
+  local notified = setup_capturing_warnings({
+    colors = { [1] = { bg = "#ff0000", bold = "yes" } },
+  })
+  MiniTest.expect.equality(notified_matches(notified, "colors%[1%]%.bold must be a boolean"), true)
+  helpers.clear_hl("PinWord1")
+end
+
+T["setup warns on out-of-range ctermbg"] = function()
+  helpers.clear_hl("PinWord1")
+  local notified = setup_capturing_warnings({
+    colors = { [1] = { ctermbg = 256 } },
+  })
+  MiniTest.expect.equality(
+    notified_matches(notified, "colors%[1%]%.ctermbg must be an integer between 0 and 255"),
+    true
+  )
+  helpers.clear_hl("PinWord1")
+end
+
+T["setup warns on non-integer ctermfg"] = function()
+  helpers.clear_hl("PinWord1")
+  local notified = setup_capturing_warnings({
+    colors = { [1] = { ctermfg = 1.5 } },
+  })
+  MiniTest.expect.equality(
+    notified_matches(notified, "colors%[1%]%.ctermfg must be an integer between 0 and 255"),
+    true
+  )
+  helpers.clear_hl("PinWord1")
+end
+
+T["setup accepts valid cterm colors and style booleans"] = function()
+  helpers.clear_hl("PinWord1")
+  local notified = setup_capturing_warnings({
+    colors = { [1] = { ctermbg = 0, ctermfg = 255, bold = true, underline = false } },
+  })
+  MiniTest.expect.equality(notified_matches(notified, "colors"), false)
+  helpers.clear_hl("PinWord1")
+end
+
+T["validate rejects invalid style and cterm values"] = function()
+  local config = require("pinwords.config")
+  local cfg = config.default_config()
+  cfg.colors = { [1] = { bold = "yes" }, [2] = { ctermbg = 300 } }
+
+  local errors = config.validate(cfg)
+  local joined = table.concat(errors, "\n")
+  MiniTest.expect.equality(joined:match("bold must be a boolean") ~= nil, true)
+  MiniTest.expect.equality(joined:match("ctermbg must be an integer between 0 and 255") ~= nil, true)
+end
+
 T["setup warns on non-table colors"] = function()
   local pinwords = require("pinwords")
   local notified = {}
