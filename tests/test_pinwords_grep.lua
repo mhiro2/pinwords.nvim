@@ -881,4 +881,85 @@ T["git grep fallback enforces one-sided boundaries on its results"] = function()
   MiniTest.expect.equality(items[2].col, 13)
 end
 
+T["grep drops backend boundaries at non-ASCII endpoints"] = function()
+  -- Pinned where the multibyte characters were keyword characters, so the saved
+  -- pattern has boundaries ripgrep's \b cannot be trusted to satisfy.
+  local slots = {
+    [1] = {
+      raw = "\228\184\128foo\228\184\128",
+      pattern = "\\V\\C\\<\228\184\128foo\228\184\128\\>",
+      hl_group = "PinWord1",
+      whole_word = true,
+      case_sensitive = true,
+    },
+  }
+
+  MiniTest.expect.equality(grep.build_rg_pattern(slots, nil), "\228\184\128foo\228\184\128")
+  MiniTest.expect.equality(grep.build_vim_pattern(slots, nil), "\\V\\C\\<\228\184\128foo\228\184\128\\>")
+end
+
+T["git grep results are verified even when -w was used"] = function()
+  local slots = {
+    [1] = {
+      raw = "foo",
+      pattern = "\\V\\C\\<foo\\>",
+      hl_group = "PinWord1",
+      whole_word = true,
+      case_sensitive = true,
+    },
+  }
+
+  local captured = { argvs = {} }
+  -- git grep -w treats the multibyte prefix as a word separator, but \k does
+  -- not, so that line must not survive.
+  local stdout = table.concat({
+    "lua/a.lua:1:1:foo bar",
+    "lua/b.lua:2:1:\228\184\128foo",
+  }, "\n") .. "\n"
+
+  local orig_executable = vim.fn.executable
+  local orig_system = vim.system
+  local orig_schedule = vim.schedule
+  local orig_setqflist = vim.fn.setqflist
+  local orig_nvim_cmd = vim.api.nvim_cmd
+  local orig_fs_root = vim.fs.root
+
+  vim.fn.executable = function(bin)
+    return bin == "git" and 1 or 0
+  end
+  vim.fs.root = function()
+    return "/repo"
+  end
+  vim.system = function(argv, _opts, on_exit)
+    captured.argvs[#captured.argvs + 1] = argv
+    if on_exit then
+      on_exit({ code = 0, stdout = stdout, stderr = "" })
+    end
+    return {}
+  end
+  vim.schedule = function(fn)
+    fn()
+  end
+  vim.fn.setqflist = function(_list, _action, what)
+    captured.what = what
+  end
+  vim.api.nvim_cmd = function(_cmd, _opts) end
+
+  local ok = pcall(function()
+    grep._fallback_grep(slots, nil)
+  end)
+
+  vim.fn.executable = orig_executable
+  vim.system = orig_system
+  vim.schedule = orig_schedule
+  vim.fn.setqflist = orig_setqflist
+  vim.api.nvim_cmd = orig_nvim_cmd
+  vim.fs.root = orig_fs_root
+
+  MiniTest.expect.equality(ok, true)
+  MiniTest.expect.equality(vim.tbl_contains(captured.argvs[1], "-w"), true)
+  MiniTest.expect.equality(#captured.what.items, 1)
+  MiniTest.expect.equality(captured.what.items[1].filename, "lua/a.lua")
+end
+
 return T
