@@ -13,31 +13,6 @@ local function normalize_region(start_row, start_col, end_row, end_col)
   return start_row, start_col, end_row, end_col
 end
 
----@param line string
----@param col integer
----@return integer
-local function char_end_byte_col(line, col)
-  local line_len = #line
-  if line_len == 0 then
-    return 0
-  end
-
-  local col0 = math.min(math.max(col - 1, 0), line_len - 1)
-  local ok, char_idx
-  ok, char_idx = pcall(vim.str_utfindex, line, "utf-32", col0)
-  if not ok then
-    return line_len
-  end
-
-  local ok_byte, byte_idx
-  ok_byte, byte_idx = pcall(vim.str_byteindex, line, "utf-32", char_idx + 1)
-  if not ok_byte then
-    return line_len
-  end
-
-  return math.min(byte_idx, line_len)
-end
-
 ---@param buf integer
 ---@return integer[]|nil, integer[]|nil
 local function get_visual_marks(buf)
@@ -91,31 +66,24 @@ function M.get()
     return ""
   end
 
-  local start_row = start_pos[2]
-  local start_col = start_pos[3]
-  local end_row = end_pos[2]
-  local end_col = end_pos[3]
-
-  if start_row == 0 or end_row == 0 then
+  if start_pos[2] == 0 or end_pos[2] == 0 then
     return ""
   end
 
-  start_row, start_col, end_row, end_col = normalize_region(start_row, start_col, end_row, end_col)
+  -- visualmode() reports the last Visual mode used in the current buffer, so
+  -- charwise/linewise/blockwise selections (and 'selection=exclusive') are all
+  -- resolved the same way Neovim itself resolves them.
+  local mode = vim.fn.visualmode()
+  if mode == "" then
+    mode = "v"
+  end
 
-  local lines = vim.api.nvim_buf_get_lines(buf, start_row - 1, end_row, false)
-  if #lines == 0 then
+  local ok, lines = pcall(vim.fn.getregion, start_pos, end_pos, { type = mode })
+  if not ok or type(lines) ~= "table" then
     return ""
   end
 
-  if start_col == 0 or end_col == 0 then
-    return table.concat(lines, "\n")
-  end
-
-  local first_line_len = #lines[1]
-  local start_byte_col = math.min(math.max(start_col - 1, 0), first_line_len)
-  local end_byte_col = char_end_byte_col(lines[#lines], end_col)
-  local selected = vim.api.nvim_buf_get_text(buf, start_row - 1, start_byte_col, end_row - 1, end_byte_col, {})
-  return table.concat(selected, "\n")
+  return table.concat(lines, "\n")
 end
 
 ---@param opts PinwordsCommandOpts
