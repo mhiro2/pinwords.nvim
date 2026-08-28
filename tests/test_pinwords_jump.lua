@@ -292,4 +292,30 @@ T["jump_next preserves mixed case sensitivity per slot"] = function()
   MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0)[2], 4) -- Wrap to "Foo", not "foo"
 end
 
+T["jump_next visits merged slots in buffer order with whole-word bodies"] = function()
+  helpers.setup_buffer({ "qux bar foobar foo", "baz" })
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
+
+  local pinwords = require("pinwords")
+  pinwords.set(1, { raw = "foo", whole_word = true })
+  pinwords.set(2, { raw = "bar", whole_word = true })
+  pinwords.set(3, { raw = "missing", whole_word = true })
+  pinwords.set(4, { raw = "baz", whole_word = false })
+
+  MiniTest.expect.equality(pinwords.jump_next(), true)
+  MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), { 1, 4 }) -- "qux [b]ar"
+
+  MiniTest.expect.equality(pinwords.jump_next(), true)
+  MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), { 1, 15 }) -- skips "foobar", lands on "[f]oo"
+
+  MiniTest.expect.equality(pinwords.jump_next(), true)
+  MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), { 2, 0 }) -- "[b]az"
+
+  MiniTest.expect.equality(pinwords.jump_prev(), true)
+  MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), { 1, 15 })
+
+  MiniTest.expect.equality(pinwords.jump_prev(2), true)
+  MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), { 1, 4 })
+end
+
 return T
