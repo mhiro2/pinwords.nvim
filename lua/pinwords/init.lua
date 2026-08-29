@@ -455,6 +455,11 @@ function M.teardown()
   matcher.clear_all_globally()
   commands.teardown()
 
+  local grep = package.loaded["pinwords.grep"]
+  if grep then
+    grep.teardown()
+  end
+
   state.teardown()
 end
 

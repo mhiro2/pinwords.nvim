@@ -439,6 +439,23 @@ local function sort_and_dedup_items(items)
   return out
 end
 
+-- Identifies the most recent search. Async completion callbacks compare against
+-- it so a slower, older invocation cannot overwrite the quickfix list of a newer
+-- one, and so nothing fires after teardown.
+local run_id = 0
+
+---@return integer
+local function next_run_id()
+  run_id = run_id + 1
+  return run_id
+end
+
+---@param id integer
+---@return boolean
+local function is_current_run(id)
+  return id == run_id
+end
+
 ---@param stdout string
 ---@return vim.quickfix.entry[]
 local function parse_rg_vimgrep(stdout)
@@ -489,11 +506,14 @@ local function handle_rg_result(result, entries)
 end
 
 ---Dispatch ripgrep asynchronously so the UI is not blocked while scanning.
----Returns true when the rg invocation was started (whether or not it has completed).
+---Returns true when the rg invocation was started (whether or not it has
+---completed). The pattern is passed via `-e` so a term starting with `-` is
+---never parsed as an option.
 ---@param rg_pattern string
 ---@param entries PinwordsGrepEntry[]
+---@param id integer
 ---@return boolean
-local function try_rg_fallback(rg_pattern, entries)
+local function try_rg_fallback(rg_pattern, entries, id)
   if vim.fn.executable("rg") ~= 1 or type(vim.system) ~= "function" then
     return false
   end
@@ -503,9 +523,13 @@ local function try_rg_fallback(rg_pattern, entries)
     "--vimgrep",
     "--color=never",
     "--no-heading",
+    "-e",
     rg_pattern,
   }, { text = true }, function(result)
     vim.schedule(function()
+      if not is_current_run(id) then
+        return
+      end
       handle_rg_result(result, entries)
     end)
   end)
@@ -564,8 +588,9 @@ end
 ---semantics could not otherwise be honored in one call. Returns true when the
 ---invocations were started so the caller skips the synchronous fallback.
 ---@param entries PinwordsGrepEntry[]
+---@param id integer
 ---@return boolean
-local function try_git_grep_fallback(entries)
+local function try_git_grep_fallback(entries, id)
   if type(vim.system) ~= "function" or vim.fn.executable("git") ~= 1 then
     return false
   end
@@ -581,6 +606,10 @@ local function try_git_grep_fallback(entries)
   for _, entry in ipairs(entries) do
     vim.system(build_git_grep_cmd(entry), { text = true }, function(result)
       vim.schedule(function()
+        if not is_current_run(id) then
+          return
+        end
+
         if result.code == 0 then
           local parsed = verify_items({ entry }, parse_rg_vimgrep(result.stdout or ""))
           for _, item in ipairs(parsed) do
@@ -646,23 +675,19 @@ local function run_vimgrep_with_ignores(vim_pattern)
   return ok, err
 end
 
----Run fallback grep using ripgrep when available, then Vim's vimgrep.
----@param slots table<integer, PinwordsSlot>
----@param slot? integer
-function M._fallback_grep(slots, slot)
-  local entries = resolve_search_entries("grep", slots, slot)
-  if not entries then
-    return
-  end
-
+---Run fallback grep for already-resolved entries using ripgrep when available,
+---then `git grep`, then Vim's vimgrep.
+---@param entries PinwordsGrepEntry[]
+---@param id integer  run id claimed by the caller before it resolved entries
+local function run_fallback_grep(entries, id)
   local rg_pattern = build_rg_pattern_from_entries(entries)
-  if rg_pattern and try_rg_fallback(rg_pattern, entries) then
+  if rg_pattern and try_rg_fallback(rg_pattern, entries, id) then
     return
   end
 
   -- ripgrep is unavailable; delegate to an asynchronous `git grep` so large
   -- repositories no longer freeze the UI the way a synchronous vimgrep does.
-  if try_git_grep_fallback(entries) then
+  if try_git_grep_fallback(entries, id) then
     return
   end
 
@@ -701,10 +726,32 @@ function M._fallback_grep(slots, slot)
   vim.api.nvim_cmd({ cmd = "copen" }, {})
 end
 
+---Run fallback grep using ripgrep when available, then Vim's vimgrep.
+---@param slots table<integer, PinwordsSlot>
+---@param slot? integer
+function M._fallback_grep(slots, slot)
+  local id = next_run_id()
+  local entries = resolve_search_entries("grep", slots, slot)
+  if not entries then
+    return
+  end
+  run_fallback_grep(entries, id)
+end
+
+---Invalidate in-flight searches so their completion callbacks no longer touch
+---the quickfix list.
+---@return nil
+function M.teardown()
+  next_run_id()
+end
+
 ---Run grep via the best available picker backend.
 ---@param opts? { slot?: integer }
 function M.grep(opts)
   opts = opts or {}
+  -- Claim a run id up front: any search supersedes an in-flight fallback, even
+  -- when this one ends in a picker or without pinned words.
+  local id = next_run_id()
   local pinwords = require("pinwords")
   local slots = pinwords.list()
   local entries = resolve_search_entries("grep", slots, opts.slot)
@@ -755,14 +802,16 @@ function M.grep(opts)
     end
   end
 
-  -- Fallback: vimgrep to quickfix
-  M._fallback_grep(slots, opts.slot)
+  -- Fallback: vimgrep to quickfix. Entries are already resolved, so reuse them
+  -- instead of resolving again and repeating the multi-line skip warning.
+  run_fallback_grep(entries, id)
 end
 
 ---Run live_grep via the best available picker backend.
 ---@param opts? { slot?: integer }
 function M.live_grep(opts)
   opts = opts or {}
+  local id = next_run_id()
   local pinwords = require("pinwords")
   local slots = pinwords.list()
   local entries = resolve_search_entries("live grep", slots, opts.slot)
@@ -812,8 +861,9 @@ function M.live_grep(opts)
     end
   end
 
-  -- Fallback: vimgrep to quickfix
-  M._fallback_grep(slots, opts.slot)
+  -- Fallback: vimgrep to quickfix. Entries are already resolved, so reuse them
+  -- instead of resolving again and repeating the multi-line skip warning.
+  run_fallback_grep(entries, id)
 end
 
 return M
