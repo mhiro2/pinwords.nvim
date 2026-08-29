@@ -1172,4 +1172,62 @@ T["verification keeps every match on a line at its own column"] = function()
   MiniTest.expect.equality(captured.what.items[2].col, 9)
 end
 
+T["verification enforces boundaries a slot pinned under another iskeyword"] = function()
+  -- Saved with `-` as a keyword character, so `\\<-foo\\>` matches nothing here;
+  -- verification still enforces "no keyword character before the match".
+  local slots = {
+    [1] = {
+      raw = "-foo",
+      pattern = "\\V\\C\\<-foo\\>",
+      hl_group = "PinWord1",
+      whole_word = true,
+      case_sensitive = true,
+    },
+  }
+
+  local captured = {}
+  local stdout = table.concat({
+    "lua/a.lua:1:2:x-foo",
+    "lua/b.lua:2:3:x -foo y",
+  }, "\n") .. "\n"
+
+  local orig_executable = vim.fn.executable
+  local orig_system = vim.system
+  local orig_schedule = vim.schedule
+  local orig_setqflist = vim.fn.setqflist
+  local orig_nvim_cmd = vim.api.nvim_cmd
+
+  vim.fn.executable = function(bin)
+    return bin == "rg" and 1 or 0
+  end
+  vim.system = function(_argv, _opts, on_exit)
+    if on_exit then
+      on_exit({ code = 0, stdout = stdout, stderr = "" })
+    end
+    return {}
+  end
+  vim.schedule = function(fn)
+    fn()
+  end
+  vim.fn.setqflist = function(_list, _action, what)
+    captured.what = what
+  end
+  vim.api.nvim_cmd = function(_cmd, _opts) end
+
+  local ok = pcall(function()
+    grep._fallback_grep(slots, nil)
+  end)
+
+  vim.fn.executable = orig_executable
+  vim.system = orig_system
+  vim.schedule = orig_schedule
+  vim.fn.setqflist = orig_setqflist
+  vim.api.nvim_cmd = orig_nvim_cmd
+
+  MiniTest.expect.equality(ok, true)
+  MiniTest.expect.equality(#captured.what.items, 1)
+  MiniTest.expect.equality(captured.what.items[1].filename, "lua/b.lua")
+  MiniTest.expect.equality(captured.what.items[1].col, 3)
+end
+
 return T

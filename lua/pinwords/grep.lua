@@ -295,17 +295,30 @@ end
 ---not satisfy it. Reusing the saved pattern makes the check exact for multibyte
 ---text, `iskeyword`, and case folding, because it is the very pattern the
 ---highlight uses.
+---Build the pattern used to verify results: the slot's literal text with a "no
+---keyword character adjacent" assertion on each end that carries a boundary.
+---`\<` and `\>` cannot express that next to a non-keyword character -- a slot
+---pinned where `iskeyword` was wider would then match nothing at all -- while
+---`\%(\k\)\@<!` and `\%(\k\)\@!` state exactly the same condition for any text.
 ---@param entry PinwordsGrepEntry
----@return vim.regex|nil
+---@return string
+local function verification_pattern(entry)
+  local body = escape_vim_literal(entry.raw)
+  if entry.left_boundary then
+    body = "\\%(\\k\\)\\@<!" .. body
+  end
+  if entry.right_boundary then
+    body = body .. "\\%(\\k\\)\\@!"
+  end
+  return (entry.case_sensitive and "\\V\\C" or "\\V\\c") .. body
+end
+
+---@param entry PinwordsGrepEntry
+---@return vim.regex|nil regex, string pattern_text
 local function entry_regex(entry)
-  if type(entry.pattern) ~= "string" then
-    return nil
-  end
-  local ok, regex = pcall(vim.regex, entry.pattern)
-  if not ok then
-    return nil
-  end
-  return regex
+  local pattern_text = verification_pattern(entry)
+  local ok, regex = pcall(vim.regex, pattern_text)
+  return ok and regex or nil, pattern_text
 end
 
 ---@param entries PinwordsGrepEntry[]
@@ -323,19 +336,19 @@ end
 ---checked at exactly the position the backend reported while the rest of the
 ---line still provides context for `\<` and `\>`. `\%<n>c` counts bytes, which is
 ---what quickfix columns are.
----@param entry PinwordsGrepEntry
+---@param pattern_text string
 ---@param col integer
 ---@param cache table<string, vim.regex|false>
 ---@return vim.regex|nil
-local function anchored_regex(entry, col, cache)
-  local key = entry.pattern .. "\0" .. col
+local function anchored_regex(pattern_text, col, cache)
+  local key = pattern_text .. "\0" .. col
   local cached = cache[key]
   if cached ~= nil then
     return cached or nil
   end
 
   -- The pattern always begins with the four-byte `\V\c` / `\V\C` prefix.
-  local anchored = entry.pattern:sub(1, 4) .. ("\\%%%dc"):format(col) .. entry.pattern:sub(5)
+  local anchored = pattern_text:sub(1, 4) .. ("\\%%%dc"):format(col) .. pattern_text:sub(5)
   local ok, regex = pcall(vim.regex, anchored)
   cache[key] = ok and regex or false
   return ok and regex or nil
@@ -354,17 +367,12 @@ local function verify_items(entries, items)
     return items
   end
 
-  local regexes = {}
+  local verifiers = {}
   for _, entry in ipairs(entries) do
-    local regex = entry_regex(entry)
-    -- Skip verification unless every pattern is usable here. A pattern that
-    -- cannot match even its own raw text is unsatisfiable in this buffer -- it
-    -- was pinned where `iskeyword` was wider -- so verifying against it would
-    -- drop every result instead of narrowing them.
-    if not regex or not regex:match_str(entry.raw) then
-      return items
-    end
-    regexes[#regexes + 1] = { entry = entry, regex = regex }
+    -- An entry with no usable pattern accepts its results unchecked, so one such
+    -- entry does not disable verification for the others.
+    local regex, pattern_text = entry_regex(entry)
+    verifiers[#verifiers + 1] = { regex = regex, pattern_text = pattern_text }
   end
 
   local anchored_cache = {}
@@ -373,13 +381,19 @@ local function verify_items(entries, items)
 
   for _, item in ipairs(items) do
     local col
-    for _, candidate in ipairs(regexes) do
-      local anchored = anchored_regex(candidate.entry, item.col, anchored_cache)
+    for _, verifier in ipairs(verifiers) do
+      if not verifier.regex then
+        col = item.col
+        break
+      end
+
+      local anchored = anchored_regex(verifier.pattern_text, item.col, anchored_cache)
       if anchored and anchored:match_str(item.text) then
         col = item.col
         break
       end
-      local match_start = candidate.regex:match_str(item.text)
+
+      local match_start = verifier.regex:match_str(item.text)
       if match_start and not col then
         col = match_start + 1
       end
