@@ -27,15 +27,35 @@ local function is_ascii_word_char(char)
   return char:match("^[%w_]$") ~= nil
 end
 
----ripgrep's `\b` is Unicode-aware, so it can anchor next to multibyte letters
----as well; only an ASCII character that ripgrep does not count as a word
----character makes the boundary unsatisfiable. Emitting `\b` wherever ripgrep can
----honor it keeps the pattern as precise as possible for the picker backends,
----which receive only a pattern and cannot have their results verified.
----@param char string
+---ripgrep's `\b` is Unicode-aware, so it can anchor next to multibyte letters as
+---well. Blanks, punctuation and emoji are not word characters for ripgrep, so a
+---boundary next to them would be unsatisfiable and is dropped instead. Emitting
+---`\b` wherever ripgrep can honor it keeps the pattern as precise as possible for
+---the picker backends, which receive only a pattern and whose results cannot be
+---verified afterwards.
+---@param char string  a single character, not a byte
 ---@return boolean
 local function is_rg_word_char(char)
-  return char ~= "" and (char:match("^[%p%s]") == nil or char == "_")
+  if char == "" then
+    return false
+  end
+  if #char == 1 then
+    return char:match("^[%w_]$") ~= nil
+  end
+
+  -- 0 blank, 1 punctuation, 3 emoji; letters and CJK fall in the other classes.
+  local class = vim.fn.charclass(char)
+  return class ~= 0 and class ~= 1 and class ~= 3
+end
+
+---@param text string
+---@return string first, string last  endpoint characters, not bytes
+local function endpoint_chars(text)
+  local count = vim.fn.strchars(text)
+  if count == 0 then
+    return "", ""
+  end
+  return vim.fn.strcharpart(text, 0, 1), vim.fn.strcharpart(text, count - 1, 1)
 end
 
 ---Recover which ends of the saved pattern carry a word boundary. Reading the
@@ -174,12 +194,13 @@ end
 ---@return string
 local function build_rg_term(entry)
   local term = escape_rg(entry.raw)
+  local first, last = endpoint_chars(entry.raw)
   -- Mirror the highlight pattern, but skip a `\b` that ripgrep could never
   -- satisfy because the endpoint is not a word character for ripgrep.
-  if entry.left_boundary and is_rg_word_char(entry.raw:sub(1, 1)) then
+  if entry.left_boundary and is_rg_word_char(first) then
     term = "\\b" .. term
   end
-  if entry.right_boundary and is_rg_word_char(entry.raw:sub(-1)) then
+  if entry.right_boundary and is_rg_word_char(last) then
     term = term .. "\\b"
   end
 
@@ -298,9 +319,33 @@ local function entries_need_verification(entries)
   return false
 end
 
----Keep the result lines that at least one pinned entry really matches, moving
----the reported column to that match. Results are visited in backend order, so
----the original ordering is preserved.
+---Compile the entry's pattern anchored at a byte column, so a result can be
+---checked at exactly the position the backend reported while the rest of the
+---line still provides context for `\<` and `\>`. `\%<n>c` counts bytes, which is
+---what quickfix columns are.
+---@param entry PinwordsGrepEntry
+---@param col integer
+---@param cache table<string, vim.regex|false>
+---@return vim.regex|nil
+local function anchored_regex(entry, col, cache)
+  local key = entry.pattern .. "\0" .. col
+  local cached = cache[key]
+  if cached ~= nil then
+    return cached or nil
+  end
+
+  -- The pattern always begins with the four-byte `\V\c` / `\V\C` prefix.
+  local anchored = entry.pattern:sub(1, 4) .. ("\\%%%dc"):format(col) .. entry.pattern:sub(5)
+  local ok, regex = pcall(vim.regex, anchored)
+  cache[key] = ok and regex or false
+  return ok and regex or nil
+end
+
+---Keep the results that at least one pinned entry really matches. A result is
+---kept at its own column when the match starts there, so several matches on one
+---line stay distinct; otherwise the column moves to the line's first match,
+---which is what the single-column backends report. Results are visited in
+---backend order, and duplicates produced by that move are dropped.
 ---@param entries PinwordsGrepEntry[]
 ---@param items vim.quickfix.entry[]
 ---@return vim.quickfix.entry[]
@@ -319,17 +364,33 @@ local function verify_items(entries, items)
     if not regex or not regex:match_str(entry.raw) then
       return items
     end
-    regexes[#regexes + 1] = regex
+    regexes[#regexes + 1] = { entry = entry, regex = regex }
   end
 
+  local anchored_cache = {}
+  local seen = {}
   local out = {}
+
   for _, item in ipairs(items) do
-    for _, regex in ipairs(regexes) do
-      local match_start = regex:match_str(item.text)
-      if match_start then
-        item.col = match_start + 1
-        out[#out + 1] = item
+    local col
+    for _, candidate in ipairs(regexes) do
+      local anchored = anchored_regex(candidate.entry, item.col, anchored_cache)
+      if anchored and anchored:match_str(item.text) then
+        col = item.col
         break
+      end
+      local match_start = candidate.regex:match_str(item.text)
+      if match_start and not col then
+        col = match_start + 1
+      end
+    end
+
+    if col then
+      item.col = col
+      local key = ("%s:%d:%d"):format(item.filename, item.lnum, col)
+      if not seen[key] then
+        seen[key] = true
+        out[#out + 1] = item
       end
     end
   end
@@ -456,10 +517,8 @@ end
 ---@param entry PinwordsGrepEntry
 ---@return boolean
 local function git_grep_can_use_word_flag(entry)
-  return entry.left_boundary
-    and entry.right_boundary
-    and is_ascii_word_char(entry.raw:sub(1, 1))
-    and is_ascii_word_char(entry.raw:sub(-1))
+  local first, last = endpoint_chars(entry.raw)
+  return entry.left_boundary and entry.right_boundary and is_ascii_word_char(first) and is_ascii_word_char(last)
 end
 
 ---Build the `git grep` argv for a single pinned entry. `-F` keeps the term a

@@ -1089,4 +1089,87 @@ T["verification keeps multibyte neighbours and case-folded matches, in order"] =
   MiniTest.expect.equality(items[2].filename, "lua/a.lua")
 end
 
+T["ripgrep boundaries are dropped next to emoji but kept next to letters"] = function()
+  local emoji_slots = {
+    [1] = {
+      raw = "\240\159\152\128foo",
+      pattern = "\\V\\C\\<\240\159\152\128foo\\>",
+      hl_group = "PinWord1",
+      whole_word = true,
+      case_sensitive = true,
+    },
+  }
+  -- ripgrep does not count emoji as word characters, so a leading \\b could never
+  -- match; the trailing one still can.
+  MiniTest.expect.equality(grep.build_rg_pattern(emoji_slots, nil), "\240\159\152\128foo\\b")
+
+  local letter_slots = {
+    [1] = {
+      raw = "\195\132foo",
+      pattern = "\\V\\C\\<\195\132foo\\>",
+      hl_group = "PinWord1",
+      whole_word = true,
+      case_sensitive = true,
+    },
+  }
+  MiniTest.expect.equality(grep.build_rg_pattern(letter_slots, nil), "\\b\195\132foo\\b")
+end
+
+T["verification keeps every match on a line at its own column"] = function()
+  local slots = {
+    [1] = {
+      raw = "foo",
+      pattern = "\\V\\C\\<foo\\>",
+      hl_group = "PinWord1",
+      whole_word = true,
+      case_sensitive = true,
+    },
+  }
+
+  local captured = {}
+  -- rg --vimgrep reports one result per match, so both columns must survive.
+  local stdout = table.concat({
+    "lua/a.lua:1:1:foo and foo",
+    "lua/a.lua:1:9:foo and foo",
+  }, "\n") .. "\n"
+
+  local orig_executable = vim.fn.executable
+  local orig_system = vim.system
+  local orig_schedule = vim.schedule
+  local orig_setqflist = vim.fn.setqflist
+  local orig_nvim_cmd = vim.api.nvim_cmd
+
+  vim.fn.executable = function(bin)
+    return bin == "rg" and 1 or 0
+  end
+  vim.system = function(_argv, _opts, on_exit)
+    if on_exit then
+      on_exit({ code = 0, stdout = stdout, stderr = "" })
+    end
+    return {}
+  end
+  vim.schedule = function(fn)
+    fn()
+  end
+  vim.fn.setqflist = function(_list, _action, what)
+    captured.what = what
+  end
+  vim.api.nvim_cmd = function(_cmd, _opts) end
+
+  local ok = pcall(function()
+    grep._fallback_grep(slots, nil)
+  end)
+
+  vim.fn.executable = orig_executable
+  vim.system = orig_system
+  vim.schedule = orig_schedule
+  vim.fn.setqflist = orig_setqflist
+  vim.api.nvim_cmd = orig_nvim_cmd
+
+  MiniTest.expect.equality(ok, true)
+  MiniTest.expect.equality(#captured.what.items, 2)
+  MiniTest.expect.equality(captured.what.items[1].col, 1)
+  MiniTest.expect.equality(captured.what.items[2].col, 9)
+end
+
 return T
