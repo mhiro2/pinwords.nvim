@@ -440,6 +440,7 @@ T["fallback grep prefers ripgrep quickfix and preserves slot semantics"] = funct
     "--vimgrep",
     "--color=never",
     "--no-heading",
+    "-e",
     "(?i:foo/bar)",
   })
   MiniTest.expect.equality(captured.opts.text, true)
@@ -1228,6 +1229,240 @@ T["verification enforces boundaries a slot pinned under another iskeyword"] = fu
   MiniTest.expect.equality(#captured.what.items, 1)
   MiniTest.expect.equality(captured.what.items[1].filename, "lua/b.lua")
   MiniTest.expect.equality(captured.what.items[1].col, 3)
+end
+
+T["grep warns once about multi-line pins when falling back"] = function()
+  helpers.setup_buffer({ "foo bar", "baz qux" })
+
+  local orig_executable = vim.fn.executable
+  local orig_system = vim.system
+  local orig_schedule = vim.schedule
+  local orig_setqflist = vim.fn.setqflist
+  local orig_nvim_cmd = vim.api.nvim_cmd
+
+  vim.fn.executable = function(bin)
+    return bin == "rg" and 1 or 0
+  end
+  vim.system = function(_argv, _opts, on_exit)
+    if on_exit then
+      on_exit({ code = 1, stdout = "", stderr = "" })
+    end
+    return {}
+  end
+  vim.schedule = function(fn)
+    fn()
+  end
+  vim.fn.setqflist = function(_list, _action, _what) end
+  vim.api.nvim_cmd = function(_cmd, _opts) end
+
+  local pinwords = require("pinwords")
+  pinwords.setup({
+    telescope = { enabled = false },
+    snacks = { enabled = false },
+    fzf_lua = { enabled = false },
+  })
+  pinwords.set(1, { raw = "foo", whole_word = false })
+  pinwords.set(2, { raw = "foo\nbaz", whole_word = false })
+
+  local skip_warnings = 0
+  helpers.with_notify_override(function(notified)
+    pinwords.grep()
+    for _, entry in ipairs(notified) do
+      if entry.msg:find("skipped", 1, true) then
+        skip_warnings = skip_warnings + 1
+      end
+    end
+  end)
+
+  vim.fn.executable = orig_executable
+  vim.system = orig_system
+  vim.schedule = orig_schedule
+  vim.fn.setqflist = orig_setqflist
+  vim.api.nvim_cmd = orig_nvim_cmd
+
+  MiniTest.expect.equality(skip_warnings, 1)
+end
+
+T["fallback grep passes the pattern after -e so leading dashes are safe"] = function()
+  local slots = {
+    [1] = {
+      raw = "-foo",
+      pattern = "\\V\\C-foo",
+      hl_group = "PinWord1",
+      whole_word = false,
+      case_sensitive = true,
+    },
+  }
+
+  local captured = {}
+  local orig_executable = vim.fn.executable
+  local orig_system = vim.system
+  local orig_schedule = vim.schedule
+  local orig_setqflist = vim.fn.setqflist
+  local orig_nvim_cmd = vim.api.nvim_cmd
+
+  vim.fn.executable = function(bin)
+    return bin == "rg" and 1 or 0
+  end
+  vim.system = function(argv, _opts, on_exit)
+    captured.argv = argv
+    if on_exit then
+      on_exit({ code = 1, stdout = "", stderr = "" })
+    end
+    return {}
+  end
+  vim.schedule = function(fn)
+    fn()
+  end
+  vim.fn.setqflist = function(_list, _action, _what) end
+  vim.api.nvim_cmd = function(_cmd, _opts) end
+
+  helpers.with_notify_override(function(_notified)
+    grep._fallback_grep(slots, nil)
+  end)
+
+  vim.fn.executable = orig_executable
+  vim.system = orig_system
+  vim.schedule = orig_schedule
+  vim.fn.setqflist = orig_setqflist
+  vim.api.nvim_cmd = orig_nvim_cmd
+
+  MiniTest.expect.equality(captured.argv[#captured.argv - 1], "-e")
+  MiniTest.expect.equality(captured.argv[#captured.argv], "-foo")
+end
+
+T["fallback grep drops results from superseded and torn-down runs"] = function()
+  local slots = {
+    [1] = {
+      raw = "foo",
+      pattern = "\\V\\Cfoo",
+      hl_group = "PinWord1",
+      whole_word = false,
+      case_sensitive = true,
+    },
+  }
+
+  local pending = {}
+  local opened = 0
+  local orig_executable = vim.fn.executable
+  local orig_system = vim.system
+  local orig_schedule = vim.schedule
+  local orig_setqflist = vim.fn.setqflist
+  local orig_nvim_cmd = vim.api.nvim_cmd
+
+  vim.fn.executable = function(bin)
+    return bin == "rg" and 1 or 0
+  end
+  vim.system = function(_argv, _opts, on_exit)
+    pending[#pending + 1] = on_exit
+    return {}
+  end
+  vim.schedule = function(fn)
+    fn()
+  end
+  vim.fn.setqflist = function(_list, _action, _what) end
+  vim.api.nvim_cmd = function(cmd, _opts)
+    if cmd.cmd == "copen" then
+      opened = opened + 1
+    end
+  end
+
+  local stale_notified = 0
+  helpers.with_notify_override(function(notified)
+    grep._fallback_grep(slots, nil)
+    grep._fallback_grep(slots, nil)
+
+    -- The first (now superseded) run completes last; its results are dropped.
+    pending[2]({ code = 0, stdout = "lua/a.lua:1:1:foo\n", stderr = "" })
+    pending[1]({ code = 0, stdout = "lua/b.lua:1:1:foo\n", stderr = "" })
+
+    -- After teardown, even the newest in-flight run stops touching quickfix.
+    grep._fallback_grep(slots, nil)
+    grep.teardown()
+    pending[3]({ code = 0, stdout = "lua/c.lua:1:1:foo\n", stderr = "" })
+
+    stale_notified = #notified
+  end)
+
+  vim.fn.executable = orig_executable
+  vim.system = orig_system
+  vim.schedule = orig_schedule
+  vim.fn.setqflist = orig_setqflist
+  vim.api.nvim_cmd = orig_nvim_cmd
+
+  MiniTest.expect.equality(opened, 1)
+  MiniTest.expect.equality(stale_notified, 0)
+end
+
+T["a later picker-backed grep invalidates an in-flight fallback run"] = function()
+  helpers.setup_buffer({ "foo bar" })
+
+  local slots = {
+    [1] = {
+      raw = "foo",
+      pattern = "\\V\\Cfoo",
+      hl_group = "PinWord1",
+      whole_word = false,
+      case_sensitive = true,
+    },
+  }
+
+  local pending
+  local opened = 0
+  local orig_executable = vim.fn.executable
+  local orig_system = vim.system
+  local orig_schedule = vim.schedule
+  local orig_setqflist = vim.fn.setqflist
+  local orig_nvim_cmd = vim.api.nvim_cmd
+
+  vim.fn.executable = function(bin)
+    return bin == "rg" and 1 or 0
+  end
+  vim.system = function(_argv, _opts, on_exit)
+    pending = on_exit
+    return {}
+  end
+  vim.schedule = function(fn)
+    fn()
+  end
+  vim.fn.setqflist = function(_list, _action, _what) end
+  vim.api.nvim_cmd = function(cmd, _opts)
+    if cmd.cmd == "copen" then
+      opened = opened + 1
+    end
+  end
+
+  local fzf_stub = {
+    grep = function(_opts) end,
+    live_grep = function(_opts) end,
+  }
+
+  local pinwords = require("pinwords")
+  with_loaded_module("fzf-lua", fzf_stub, function()
+    with_loaded_module("pinwords.fzf_lua", nil, function()
+      grep._fallback_grep(slots, nil)
+
+      -- The next search is served by a picker, so it must still supersede the
+      -- fallback that is still running.
+      pinwords.setup({
+        telescope = { enabled = false },
+        snacks = { enabled = false },
+        fzf_lua = { enabled = true },
+      })
+      pinwords.set(1, { raw = "foo" })
+      pinwords.grep()
+
+      pending({ code = 0, stdout = "lua/a.lua:1:1:foo\n", stderr = "" })
+    end)
+  end)
+
+  vim.fn.executable = orig_executable
+  vim.system = orig_system
+  vim.schedule = orig_schedule
+  vim.fn.setqflist = orig_setqflist
+  vim.api.nvim_cmd = orig_nvim_cmd
+
+  MiniTest.expect.equality(opened, 0)
 end
 
 return T
