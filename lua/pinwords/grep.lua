@@ -14,16 +14,76 @@ local RG_META = "[%.%+%*%?%^%$%(%)%[%]%{%}%|\\]"
 ---@field raw string
 ---@field whole_word boolean
 ---@field case_sensitive boolean
+---@field pattern string
+---@field left_boundary boolean
+---@field right_boundary boolean
+
+---`git grep -w` recognizes only ASCII letters, digits and `_` as word
+---characters, so `-w` may be used only when both endpoints are ASCII word
+---characters.
+---@param char string
+---@return boolean
+local function is_ascii_word_char(char)
+  return char:match("^[%w_]$") ~= nil
+end
+
+---ripgrep's `\b` is Unicode-aware, so it can anchor next to multibyte letters as
+---well. Blanks, punctuation and emoji are not word characters for ripgrep, so a
+---boundary next to them would be unsatisfiable and is dropped instead. Emitting
+---`\b` wherever ripgrep can honor it keeps the pattern as precise as possible for
+---the picker backends, which receive only a pattern and whose results cannot be
+---verified afterwards.
+---@param char string  a single character, not a byte
+---@return boolean
+local function is_rg_word_char(char)
+  if char == "" then
+    return false
+  end
+  if #char == 1 then
+    return char:match("^[%w_]$") ~= nil
+  end
+
+  -- 0 blank, 1 punctuation, 3 emoji; letters and CJK fall in the other classes.
+  local class = vim.fn.charclass(char)
+  return class ~= 0 and class ~= 1 and class ~= 3
+end
+
+---@param text string
+---@return string first, string last  endpoint characters, not bytes
+local function endpoint_chars(text)
+  local count = vim.fn.strchars(text)
+  if count == 0 then
+    return "", ""
+  end
+  return vim.fn.strcharpart(text, 0, 1), vim.fn.strcharpart(text, count - 1, 1)
+end
+
+---Recover which ends of the saved pattern carry a word boundary. Reading the
+---pattern instead of recomputing from `iskeyword` keeps grep aligned with the
+---highlight applied at pin time, even when the slot was pinned in a buffer with
+---different `iskeyword` settings.
+---@param entry PinwordsSlot
+---@return boolean left, boolean right
+local function boundaries_from_pattern(entry)
+  if type(entry.pattern) ~= "string" then
+    return pattern.word_boundaries(entry.raw)
+  end
+  return pattern.boundaries_of(entry.raw, entry.pattern)
+end
 
 ---@param entry PinwordsSlot
 ---@return PinwordsGrepEntry
 local function to_grep_entry(entry)
   -- Match semantics are captured on the slot at pin time, so read them
-  -- directly instead of reparsing the saved Vim pattern.
+  -- directly instead of recomputing them against the current buffer.
+  local left, right = boundaries_from_pattern(entry)
   return {
     raw = entry.raw,
     whole_word = entry.whole_word,
     case_sensitive = entry.case_sensitive,
+    pattern = entry.pattern,
+    left_boundary = entry.whole_word and left,
+    right_boundary = entry.whole_word and right,
   }
 end
 
@@ -134,16 +194,14 @@ end
 ---@return string
 local function build_rg_term(entry)
   local term = escape_rg(entry.raw)
-  if entry.whole_word then
-    -- Mirror the highlight pattern: a boundary only where the text ends in a
-    -- keyword character, so `-foo` still matches under whole_word.
-    local left, right = pattern.word_boundaries(entry.raw)
-    if left then
-      term = "\\b" .. term
-    end
-    if right then
-      term = term .. "\\b"
-    end
+  local first, last = endpoint_chars(entry.raw)
+  -- Mirror the highlight pattern, but skip a `\b` that ripgrep could never
+  -- satisfy because the endpoint is not a word character for ripgrep.
+  if entry.left_boundary and is_rg_word_char(first) then
+    term = "\\b" .. term
+  end
+  if entry.right_boundary and is_rg_word_char(last) then
+    term = term .. "\\b"
   end
 
   if not entry.case_sensitive then
@@ -174,14 +232,11 @@ end
 ---@return string
 local function build_vim_term(entry)
   local term = escape_vim_literal(entry.raw)
-  if entry.whole_word then
-    local left, right = pattern.word_boundaries(entry.raw)
-    if left then
-      term = "\\<" .. term
-    end
-    if right then
-      term = term .. "\\>"
-    end
+  if entry.left_boundary then
+    term = "\\<" .. term
+  end
+  if entry.right_boundary then
+    term = term .. "\\>"
   end
   return (entry.case_sensitive and "\\C" or "\\c") .. term
 end
@@ -234,112 +289,127 @@ local function open_quickfix(title, items)
   vim.api.nvim_cmd({ cmd = "copen" }, {})
 end
 
----@param stdout string
----@return vim.quickfix.entry[]
-local function parse_rg_vimgrep(stdout)
-  local items = {}
-
-  for line in stdout:gmatch("[^\r\n]+") do
-    local filename, lnum, col, text = line:match("^(.+):(%d+):(%d+):(.*)$")
-    if filename then
-      items[#items + 1] = {
-        filename = filename,
-        lnum = tonumber(lnum),
-        col = tonumber(col),
-        text = text,
-      }
-    end
-  end
-
-  return items
-end
-
----@param result vim.SystemCompleted
----@return nil
-local function handle_rg_result(result)
-  if result.code == 1 then
-    vim.notify("pinwords: grep found no matches", vim.log.levels.INFO)
-    return
-  end
-
-  if result.code ~= 0 then
-    local msg = vim.trim(result.stderr or "")
-    if msg == "" then
-      msg = "rg exited with code " .. result.code
-    end
-    vim.notify("pinwords: grep failed: " .. msg, vim.log.levels.WARN)
-    return
-  end
-
-  local items = parse_rg_vimgrep(result.stdout or "")
-  if #items == 0 then
-    vim.notify("pinwords: grep found no matches", vim.log.levels.INFO)
-    return
-  end
-
-  open_quickfix("pinwords grep", items)
-end
-
----Dispatch ripgrep asynchronously so the UI is not blocked while scanning.
----Returns true when the rg invocation was started (whether or not it has completed).
----@param rg_pattern string
----@return boolean
-local function try_rg_fallback(rg_pattern)
-  if vim.fn.executable("rg") ~= 1 or type(vim.system) ~= "function" then
-    return false
-  end
-
-  vim.system({
-    "rg",
-    "--vimgrep",
-    "--color=never",
-    "--no-heading",
-    rg_pattern,
-  }, { text = true }, function(result)
-    vim.schedule(function()
-      handle_rg_result(result)
-    end)
-  end)
-
-  return true
-end
-
----Return true when the cwd is inside a Git working tree. `git grep` is run from
----the cwd (not the repository root) so it searches the cwd subtree, matching the
----scope of the `rg` and `vimgrep` fallbacks.
----@return boolean
-local function inside_git_repo()
-  local cwd = vim.uv.cwd()
-  if not cwd then
-    return false
-  end
-  return vim.fs.root(cwd, ".git") ~= nil
-end
-
----Build the `git grep` argv for a single pinned entry. `-F` keeps the term a
----literal so there is no regex-dialect mismatch, while `-w`/`-i` reproduce the
----slot's whole-word and case sensitivity; `-w` is dropped when the text starts
----or ends with a non-keyword character because git grep would then require a
----boundary that can never exist. `-n --column` output matches the
----`file:line:col:text` shape that `parse_rg_vimgrep` already understands.
----`--untracked --exclude-standard` mirrors ripgrep: search tracked files plus
----untracked files that are not gitignored.
+---Backend flags are only a pre-filter: `git grep -w` cannot express one-sided
+---boundaries and judges words by ASCII alone, and a ripgrep `\b` is omitted
+---where ripgrep could not satisfy it. Checking each result with a Vim pattern
+---makes the verification exact for multibyte text, `iskeyword`, and case
+---folding, matching what the highlight would do.
+---
+---Build the pattern used to verify results: the slot's literal text with a "no
+---keyword character adjacent" assertion on each end that carries a boundary.
+---`\<` and `\>` cannot express that next to a non-keyword character -- a slot
+---pinned where `iskeyword` was wider would then match nothing at all -- while
+---`\%(\k\)\@<!` and `\%(\k\)\@!` state exactly the same condition for any text.
 ---@param entry PinwordsGrepEntry
----@return string[]
-local function build_git_grep_cmd(entry)
-  local cmd = { "git", "grep", "--no-color", "-I", "-n", "--column", "--untracked", "--exclude-standard", "-F" }
-  if entry.whole_word then
-    local left, right = pattern.word_boundaries(entry.raw)
-    if left and right then
-      cmd[#cmd + 1] = "-w"
+---@return string
+local function verification_pattern(entry)
+  local body = escape_vim_literal(entry.raw)
+  if entry.left_boundary then
+    body = "\\%(\\k\\)\\@<!" .. body
+  end
+  if entry.right_boundary then
+    body = body .. "\\%(\\k\\)\\@!"
+  end
+  return (entry.case_sensitive and "\\V\\C" or "\\V\\c") .. body
+end
+
+---@param entry PinwordsGrepEntry
+---@return vim.regex|nil regex, string pattern_text
+local function entry_regex(entry)
+  local pattern_text = verification_pattern(entry)
+  local ok, regex = pcall(vim.regex, pattern_text)
+  return ok and regex or nil, pattern_text
+end
+
+---@param entries PinwordsGrepEntry[]
+---@return boolean
+local function entries_need_verification(entries)
+  for _, entry in ipairs(entries) do
+    if entry.left_boundary or entry.right_boundary then
+      return true
     end
   end
-  if not entry.case_sensitive then
-    cmd[#cmd + 1] = "-i"
+  return false
+end
+
+---Compile the entry's pattern anchored at a byte column, so a result can be
+---checked at exactly the position the backend reported while the rest of the
+---line still provides context for `\<` and `\>`. `\%<n>c` counts bytes, which is
+---what quickfix columns are.
+---@param pattern_text string
+---@param col integer
+---@param cache table<string, vim.regex|false>
+---@return vim.regex|nil
+local function anchored_regex(pattern_text, col, cache)
+  local key = pattern_text .. "\0" .. col
+  local cached = cache[key]
+  if cached ~= nil then
+    return cached or nil
   end
-  cmd[#cmd + 1] = "-e"
-  cmd[#cmd + 1] = entry.raw
-  return cmd
+
+  -- The pattern always begins with the four-byte `\V\c` / `\V\C` prefix.
+  local anchored = pattern_text:sub(1, 4) .. ("\\%%%dc"):format(col) .. pattern_text:sub(5)
+  local ok, regex = pcall(vim.regex, anchored)
+  cache[key] = ok and regex or false
+  return ok and regex or nil
+end
+
+---Keep the results that at least one pinned entry really matches. A result is
+---kept at its own column when the match starts there, so several matches on one
+---line stay distinct; otherwise the column moves to the line's first match,
+---which is what the single-column backends report. Results are visited in
+---backend order, and duplicates produced by that move are dropped.
+---@param entries PinwordsGrepEntry[]
+---@param items vim.quickfix.entry[]
+---@return vim.quickfix.entry[]
+local function verify_items(entries, items)
+  if not entries_need_verification(entries) then
+    return items
+  end
+
+  local verifiers = {}
+  for _, entry in ipairs(entries) do
+    -- An entry with no usable pattern accepts its results unchecked, so one such
+    -- entry does not disable verification for the others.
+    local regex, pattern_text = entry_regex(entry)
+    verifiers[#verifiers + 1] = { regex = regex, pattern_text = pattern_text }
+  end
+
+  local anchored_cache = {}
+  local seen = {}
+  local out = {}
+
+  for _, item in ipairs(items) do
+    local col
+    for _, verifier in ipairs(verifiers) do
+      if not verifier.regex then
+        col = item.col
+        break
+      end
+
+      local anchored = anchored_regex(verifier.pattern_text, item.col, anchored_cache)
+      if anchored and anchored:match_str(item.text) then
+        col = item.col
+        break
+      end
+
+      local match_start = verifier.regex:match_str(item.text)
+      if match_start and not col then
+        col = match_start + 1
+      end
+    end
+
+    if col then
+      item.col = col
+      local key = ("%s:%d:%d"):format(item.filename, item.lnum, col)
+      if not seen[key] then
+        seen[key] = true
+        out[#out + 1] = item
+      end
+    end
+  end
+
+  return out
 end
 
 ---Sort quickfix items by location and drop exact duplicates so overlapping
@@ -369,6 +439,125 @@ local function sort_and_dedup_items(items)
   return out
 end
 
+---@param stdout string
+---@return vim.quickfix.entry[]
+local function parse_rg_vimgrep(stdout)
+  local items = {}
+
+  for line in stdout:gmatch("[^\r\n]+") do
+    local filename, lnum, col, text = line:match("^(.+):(%d+):(%d+):(.*)$")
+    if filename then
+      items[#items + 1] = {
+        filename = filename,
+        lnum = tonumber(lnum),
+        col = tonumber(col),
+        text = text,
+      }
+    end
+  end
+
+  return items
+end
+
+---@param result vim.SystemCompleted
+---@param entries PinwordsGrepEntry[]
+---@return nil
+local function handle_rg_result(result, entries)
+  if result.code == 1 then
+    vim.notify("pinwords: grep found no matches", vim.log.levels.INFO)
+    return
+  end
+
+  if result.code ~= 0 then
+    local msg = vim.trim(result.stderr or "")
+    if msg == "" then
+      msg = "rg exited with code " .. result.code
+    end
+    vim.notify("pinwords: grep failed: " .. msg, vim.log.levels.WARN)
+    return
+  end
+
+  -- ripgrep may return lines that satisfy the pattern but not the slot's word
+  -- boundaries, e.g. when a `\b` had to be omitted as unsatisfiable.
+  local items = verify_items(entries, parse_rg_vimgrep(result.stdout or ""))
+  if #items == 0 then
+    vim.notify("pinwords: grep found no matches", vim.log.levels.INFO)
+    return
+  end
+
+  open_quickfix("pinwords grep", items)
+end
+
+---Dispatch ripgrep asynchronously so the UI is not blocked while scanning.
+---Returns true when the rg invocation was started (whether or not it has completed).
+---@param rg_pattern string
+---@param entries PinwordsGrepEntry[]
+---@return boolean
+local function try_rg_fallback(rg_pattern, entries)
+  if vim.fn.executable("rg") ~= 1 or type(vim.system) ~= "function" then
+    return false
+  end
+
+  vim.system({
+    "rg",
+    "--vimgrep",
+    "--color=never",
+    "--no-heading",
+    rg_pattern,
+  }, { text = true }, function(result)
+    vim.schedule(function()
+      handle_rg_result(result, entries)
+    end)
+  end)
+
+  return true
+end
+
+---Return true when the cwd is inside a Git working tree. `git grep` is run from
+---the cwd (not the repository root) so it searches the cwd subtree, matching the
+---scope of the `rg` and `vimgrep` fallbacks.
+---@return boolean
+local function inside_git_repo()
+  local cwd = vim.uv.cwd()
+  if not cwd then
+    return false
+  end
+  return vim.fs.root(cwd, ".git") ~= nil
+end
+
+---True when `git grep -w` reproduces the entry's boundaries exactly: `-w`
+---requires a boundary on both ends, so it fits only when both ends need one and
+---both are word characters for git.
+---@param entry PinwordsGrepEntry
+---@return boolean
+local function git_grep_can_use_word_flag(entry)
+  local first, last = endpoint_chars(entry.raw)
+  return entry.left_boundary and entry.right_boundary and is_ascii_word_char(first) and is_ascii_word_char(last)
+end
+
+---Build the `git grep` argv for a single pinned entry. `-F` keeps the term a
+---literal so there is no regex-dialect mismatch, while `-w`/`-i` reproduce the
+---slot's whole-word and case sensitivity. `-w` is used only when it matches the
+---entry's boundaries exactly; one-sided boundaries are enforced afterwards by
+---`verify_items`, since `-w` cannot express them. `-n --column`
+---output matches the `file:line:col:text` shape that `parse_rg_vimgrep` already
+---understands. `--untracked --exclude-standard` mirrors ripgrep: search tracked
+---files plus untracked files that are not gitignored.
+---@param entry PinwordsGrepEntry
+---@return string[]
+local function build_git_grep_cmd(entry)
+  local cmd = { "git", "grep", "--no-color", "-I", "-n", "--column", "--untracked", "--exclude-standard", "-F" }
+  if git_grep_can_use_word_flag(entry) then
+    cmd[#cmd + 1] = "-w"
+  end
+  if not entry.case_sensitive then
+    cmd[#cmd + 1] = "-i"
+  end
+  cmd[#cmd + 1] = "-e"
+  cmd[#cmd + 1] = entry.raw
+  return cmd
+end
+
 ---Run `git grep` for every entry asynchronously, merging the results into a
 ---single quickfix list once all invocations finish. Each entry uses its own
 ---invocation because `-w`/`-i` are global flags in git grep, so per-slot match
@@ -393,7 +582,8 @@ local function try_git_grep_fallback(entries)
     vim.system(build_git_grep_cmd(entry), { text = true }, function(result)
       vim.schedule(function()
         if result.code == 0 then
-          for _, item in ipairs(parse_rg_vimgrep(result.stdout or "")) do
+          local parsed = verify_items({ entry }, parse_rg_vimgrep(result.stdout or ""))
+          for _, item in ipairs(parsed) do
             items[#items + 1] = item
           end
         elseif result.code ~= 1 then
@@ -466,7 +656,7 @@ function M._fallback_grep(slots, slot)
   end
 
   local rg_pattern = build_rg_pattern_from_entries(entries)
-  if rg_pattern and try_rg_fallback(rg_pattern) then
+  if rg_pattern and try_rg_fallback(rg_pattern, entries) then
     return
   end
 

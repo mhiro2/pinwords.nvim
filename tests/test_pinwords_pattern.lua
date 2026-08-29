@@ -84,4 +84,23 @@ T["whole_word keeps matching text that starts or ends with a symbol"] = function
   MiniTest.expect.equality(vim.fn.match("xfoo-", m2.pattern), -1)
 end
 
+T["boundaries_of distinguishes a literal backslash-gt from a boundary marker"] = function()
+  local pattern = require("pinwords.pattern")
+
+  local with_boundary = pattern.build("foo", { whole_word = true, case_sensitive = true })
+  local left, right = pattern.boundaries_of("foo", with_boundary)
+  MiniTest.expect.equality({ left, right }, { true, true })
+
+  -- Pinning `foo\>` ends the escaped body in `\\>`, which must not be read as a
+  -- trailing boundary marker.
+  local literal = pattern.build("foo\\>", { whole_word = true, case_sensitive = true })
+  left, right = pattern.boundaries_of("foo\\>", literal)
+  MiniTest.expect.equality({ left, right }, { true, false })
+
+  -- Same in the other direction for a leading `\<`.
+  local literal_left = pattern.build("\\<foo", { whole_word = true, case_sensitive = true })
+  left, right = pattern.boundaries_of("\\<foo", literal_left)
+  MiniTest.expect.equality({ left, right }, { false, true })
+end
+
 return T
