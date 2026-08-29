@@ -289,12 +289,12 @@ local function open_quickfix(title, items)
   vim.api.nvim_cmd({ cmd = "copen" }, {})
 end
 
----Verify a backend result line with the slot's own Vim pattern. Backend flags
----are only a pre-filter: `git grep -w` cannot express one-sided boundaries and
----judges words by ASCII alone, and a ripgrep `\b` is omitted where ripgrep could
----not satisfy it. Reusing the saved pattern makes the check exact for multibyte
----text, `iskeyword`, and case folding, because it is the very pattern the
----highlight uses.
+---Backend flags are only a pre-filter: `git grep -w` cannot express one-sided
+---boundaries and judges words by ASCII alone, and a ripgrep `\b` is omitted
+---where ripgrep could not satisfy it. Checking each result with a Vim pattern
+---makes the verification exact for multibyte text, `iskeyword`, and case
+---folding, matching what the highlight would do.
+---
 ---Build the pattern used to verify results: the slot's literal text with a "no
 ---keyword character adjacent" assertion on each end that carries a boundary.
 ---`\<` and `\>` cannot express that next to a non-keyword character -- a slot
