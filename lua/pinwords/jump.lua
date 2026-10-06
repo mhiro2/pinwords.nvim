@@ -109,9 +109,10 @@ end
 
 ---@param pattern string
 ---@param flags string
+---@param stopline integer
 ---@return integer[]|nil
-local function search_pos(pattern, flags)
-  local ok, pos = pcall(vim.fn.searchpos, pattern, flags)
+local function search_pos(pattern, flags, stopline)
+  local ok, pos = pcall(vim.fn.searchpos, pattern, flags, stopline)
   if not ok or not is_valid_pos(pos) then
     return nil
   end
@@ -140,14 +141,17 @@ local function pick_better_pos(pos, best, direction)
   return best
 end
 
+---Search every pattern from the cursor up to `stopline` and keep the nearest
+---hit. Once one pattern hits, the rest only need to scan up to that line.
 ---@param direction "forward"|"backward"
 ---@param patterns string[]
 ---@param flags string
+---@param stopline integer
 ---@return integer[]|nil
-local function find_best_pos(direction, patterns, flags)
+local function find_best_pos(direction, patterns, flags, stopline)
   local best
   for _, pattern in ipairs(patterns) do
-    local pos = search_pos(pattern, flags)
+    local pos = search_pos(pattern, flags, best and best[1] or stopline)
     if pos then
       best = pick_better_pos(pos, best, direction)
     end
@@ -155,21 +159,63 @@ local function find_best_pos(direction, patterns, flags)
   return best
 end
 
----Find the nearest match without wrapping first; the wrapped search only runs
----when nothing lies ahead (or behind), so a wrap scan is never paid for while a
----closer non-wrapped match exists.
+-- Lines covered by the first search window. Each later window doubles, so a
+-- pattern that never matches only scans about twice as far as the nearest hit
+-- of the others instead of the whole buffer.
+local INITIAL_WINDOW_LINES = 128
+
+---Scan from the cursor toward `last_line` in growing, non-overlapping windows
+---and return the nearest match of the first window that has one.
+---@param direction "forward"|"backward"
+---@param patterns string[]
+---@param flags string flags for the first window, which starts at the cursor
+---@param last_line integer
+---@return integer[]|nil
+local function scan_toward(direction, patterns, flags, last_line)
+  local forward = direction == "forward"
+  local line = vim.fn.line(".")
+  local size = INITIAL_WINDOW_LINES
+
+  while true do
+    local stopline = forward and math.min(line + size - 1, last_line) or math.max(line - size + 1, last_line)
+    local pos = find_best_pos(direction, patterns, flags, stopline)
+    if pos or stopline == last_line then
+      return pos
+    end
+
+    -- Resume at the edge of the next window; "c" accepts a match right there.
+    line = forward and stopline + 1 or stopline - 1
+    vim.fn.cursor(line, forward and 1 or vim.v.maxcol)
+    flags = forward and "nWc" or "nbWc"
+    size = size * 2
+  end
+end
+
+---Find the nearest match ahead of (or behind) the cursor, wrapping around the
+---buffer edge when there is none. The wrapped scan only covers the lines
+---between the opposite edge and the cursor, which the first scan never saw.
 ---@param direction "forward"|"backward"
 ---@param patterns string[]
 ---@return integer[]|nil
 local function find_next_pos(direction, patterns)
-  local no_wrap_flags = direction == "forward" and "nW" or "nbW"
-  local wrap_flags = direction == "forward" and "nw" or "nbw"
+  local forward = direction == "forward"
+  local view = vim.fn.winsaveview()
+  local cursor_line = view.lnum
+  local last_line = vim.fn.line("$")
 
-  local pos = find_best_pos(direction, patterns, no_wrap_flags)
-  if pos then
-    return pos
+  local pos = scan_toward(direction, patterns, forward and "nW" or "nbW", forward and last_line or 1)
+  if not pos then
+    if forward then
+      vim.fn.cursor(1, 1)
+    else
+      vim.fn.cursor(last_line, vim.v.maxcol)
+    end
+    pos = scan_toward(direction, patterns, forward and "nWc" or "nbWc", cursor_line)
   end
-  return find_best_pos(direction, patterns, wrap_flags)
+
+  -- The scans move the cursor to window edges; put it (and the view) back.
+  vim.fn.winrestview(view)
+  return pos
 end
 
 ---@param direction "forward"|"backward"
