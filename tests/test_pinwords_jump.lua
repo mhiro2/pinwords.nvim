@@ -336,4 +336,139 @@ T["jump_next still works when pinned text is too long for one pattern"] = functi
   MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), { 1, 0 })
 end
 
+---Build `count` filler lines and put `text` on the given 1-based lines.
+---@param count integer
+---@param placements table<integer, string>
+---@return string[]
+local function filler_lines(count, placements)
+  local lines = {}
+  for i = 1, count do
+    lines[i] = placements[i] or ("filler " .. i)
+  end
+  return lines
+end
+
+T["jump_next finds a match far beyond the first search window"] = function()
+  helpers.setup_buffer(filler_lines(5000, { [4000] = "x foo" }))
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
+
+  local pinwords = require("pinwords")
+  pinwords.set(1, { raw = "foo" })
+
+  MiniTest.expect.equality(pinwords.jump_next(), true)
+  MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), { 4000, 2 })
+
+  MiniTest.expect.equality(pinwords.jump_prev(), true)
+  MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), { 4000, 2 }) -- wraps onto itself
+end
+
+T["jump picks the nearest match across case groups at window edges"] = function()
+  -- 128 is the last line of the first window, 129 the first line of the next.
+  helpers.setup_buffer(filler_lines(1000, {
+    [128] = "foo",
+    [129] = "Bar",
+    [500] = "Bar foo",
+  }))
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
+
+  local pinwords = require("pinwords")
+  pinwords.set(1, { raw = "Bar", case_sensitive = true })
+  pinwords.set(2, { raw = "foo", case_sensitive = false })
+
+  local expected = { { 128, 0 }, { 129, 0 }, { 500, 0 }, { 500, 4 }, { 128, 0 } }
+  for _, pos in ipairs(expected) do
+    MiniTest.expect.equality(pinwords.jump_next(), true)
+    MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), pos)
+  end
+
+  for _, pos in ipairs({ { 500, 4 }, { 500, 0 }, { 129, 0 }, { 128, 0 }, { 500, 4 } }) do
+    MiniTest.expect.equality(pinwords.jump_prev(), true)
+    MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), pos)
+  end
+end
+
+T["jump_next wraps to an earlier match on the cursor line"] = function()
+  helpers.setup_buffer(filler_lines(300, { [200] = "foo bar" }))
+  vim.api.nvim_win_set_cursor(0, { 200, 4 })
+
+  local pinwords = require("pinwords")
+  pinwords.set(1, { raw = "foo" })
+
+  MiniTest.expect.equality(pinwords.jump_next(), true)
+  MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), { 200, 0 })
+
+  -- The only match is under the cursor: wrapping lands back on it.
+  MiniTest.expect.equality(pinwords.jump_next(), true)
+  MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), { 200, 0 })
+end
+
+T["jump_prev wraps to a later match on the cursor line"] = function()
+  helpers.setup_buffer(filler_lines(300, { [100] = "bar foo" }))
+  vim.api.nvim_win_set_cursor(0, { 100, 0 })
+
+  local pinwords = require("pinwords")
+  pinwords.set(1, { raw = "foo" })
+
+  MiniTest.expect.equality(pinwords.jump_prev(), true)
+  MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), { 100, 4 })
+
+  MiniTest.expect.equality(pinwords.jump_prev(), true)
+  MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), { 100, 4 })
+end
+
+T["jump_prev wraps to a match at the very end of the buffer"] = function()
+  -- The match is the last (multibyte) character of the last line.
+  helpers.setup_buffer(filler_lines(300, { [300] = "foo あ" }))
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
+
+  local pinwords = require("pinwords")
+  pinwords.set(1, { raw = "あ", whole_word = false })
+
+  MiniTest.expect.equality(pinwords.jump_prev(), true)
+  MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), { 300, 4 })
+end
+
+T["jump respects a count prefix across window edges and wraps"] = function()
+  helpers.setup_buffer(filler_lines(1000, { [10] = "foo", [600] = "foo", [900] = "foo" }))
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
+
+  local pinwords = require("pinwords")
+  pinwords.set(1, { raw = "foo" })
+  vim.keymap.set("n", "<Plug>(test-next)", pinwords.jump_next)
+  vim.keymap.set("n", "<Plug>(test-prev)", pinwords.jump_prev)
+
+  local function press(keys)
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(keys, true, false, true), "x", false)
+  end
+
+  press("3<Plug>(test-next)")
+  MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), { 900, 0 })
+
+  press("2<Plug>(test-next)")
+  MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), { 600, 0 })
+
+  press("2<Plug>(test-prev)")
+  MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), { 900, 0 })
+
+  vim.keymap.del("n", "<Plug>(test-next)")
+  vim.keymap.del("n", "<Plug>(test-prev)")
+end
+
+T["jump_next leaves cursor and view untouched when nothing matches"] = function()
+  helpers.setup_buffer(filler_lines(2000, {}))
+  vim.api.nvim_win_set_cursor(0, { 700, 3 })
+  local before = vim.fn.winsaveview()
+
+  local pinwords = require("pinwords")
+  pinwords.set(1, { raw = "foo" })
+
+  local orig_notify = vim.notify
+  vim.notify = function() end
+  local success = pinwords.jump_next()
+  vim.notify = orig_notify
+
+  MiniTest.expect.equality(success, false)
+  MiniTest.expect.equality(vim.fn.winsaveview(), before)
+end
+
 return T
