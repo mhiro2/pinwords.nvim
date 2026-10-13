@@ -249,8 +249,10 @@ local function jump(direction, slot)
 
   local count = vim.v.count1
 
-  -- Set mark for jumplist before moving
-  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("m'", true, false, true), "nx", false)
+  -- Set mark for jumplist before moving. Run it synchronously: feeding "m'"
+  -- through nvim_feedkeys with "x" would also run any pending typeahead first,
+  -- so keys typed after the jump would act on the original position.
+  vim.cmd("normal! m'")
 
   local found = do_search(direction, patterns, count)
   if not found then
