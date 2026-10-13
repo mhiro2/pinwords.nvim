@@ -526,4 +526,23 @@ T["jump inside a macro keeps the recorded key order"] = function()
   MiniTest.expect.equality(vim.api.nvim_buf_get_lines(0, 0, -1, false), { "foo---oo---oo" })
 end
 
+T["failed jump adds no jumplist entry"] = function()
+  helpers.setup_buffer({ "foo", "bar" })
+  vim.api.nvim_win_set_cursor(0, { 2, 0 })
+  vim.cmd("clearjumps")
+
+  local pinwords = require("pinwords")
+  pinwords.set(1, { raw = "baz" })
+
+  local orig_notify = vim.notify
+  vim.notify = function() end
+  local success = pinwords.jump_next()
+  vim.notify = orig_notify
+
+  MiniTest.expect.equality(success, false)
+  -- Leave the line so a recorded entry would not be merged with the cursor.
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
+  MiniTest.expect.equality(#vim.fn.getjumplist()[1], 0)
+end
+
 return T

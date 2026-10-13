@@ -230,6 +230,12 @@ local function do_search(direction, patterns, count)
     if not pos then
       break
     end
+    if not found then
+      -- Record the jumplist entry synchronously: feeding "m'" through
+      -- nvim_feedkeys with "x" would also run any pending typeahead first,
+      -- so keys typed after the jump would act on the original position.
+      vim.cmd("normal! m'")
+    end
     vim.api.nvim_win_set_cursor(0, { pos[1], pos[2] - 1 })
     found = true
   end
@@ -247,14 +253,7 @@ local function jump(direction, slot)
     return false
   end
 
-  local count = vim.v.count1
-
-  -- Set mark for jumplist before moving. Run it synchronously: feeding "m'"
-  -- through nvim_feedkeys with "x" would also run any pending typeahead first,
-  -- so keys typed after the jump would act on the original position.
-  vim.cmd("normal! m'")
-
-  local found = do_search(direction, patterns, count)
+  local found = do_search(direction, patterns, vim.v.count1)
   if not found then
     vim.notify("pinwords: no more matches", vim.log.levels.INFO)
     return false
