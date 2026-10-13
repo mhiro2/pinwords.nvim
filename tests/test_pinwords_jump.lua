@@ -471,4 +471,108 @@ T["jump_next leaves cursor and view untouched when nothing matches"] = function(
   MiniTest.expect.equality(vim.fn.winsaveview(), before)
 end
 
+---Map <Plug> keys to the any-slot and per-slot jumps for typeahead tests.
+---@return fun() unmap
+local function map_jump_keys()
+  local pinwords = require("pinwords")
+  vim.keymap.set("n", "<Plug>(test-next)", pinwords.jump_next)
+  vim.keymap.set("n", "<Plug>(test-prev)", pinwords.jump_prev)
+  vim.keymap.set("n", "<Plug>(test-next-1)", function()
+    pinwords.jump_next(1)
+  end)
+  vim.keymap.set("n", "<Plug>(test-next-2)", function()
+    pinwords.jump_next(2)
+  end)
+  return function()
+    vim.keymap.del("n", "<Plug>(test-next)")
+    vim.keymap.del("n", "<Plug>(test-prev)")
+    vim.keymap.del("n", "<Plug>(test-next-1)")
+    vim.keymap.del("n", "<Plug>(test-next-2)")
+  end
+end
+
+T["keys after a jump act on the jump target"] = function()
+  helpers.setup_buffer({ "foo---foo" })
+  require("pinwords").set(1, { raw = "foo", whole_word = false })
+  local unmap = map_jump_keys()
+
+  vim.cmd([[execute "normal \<Plug>(test-next)x"]])
+  unmap()
+
+  MiniTest.expect.equality(vim.api.nvim_buf_get_lines(0, 0, -1, false), { "foo---oo" })
+  MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), { 1, 6 })
+end
+
+T["keys after a backward jump act on the jump target"] = function()
+  helpers.setup_buffer({ "foo---foo" })
+  vim.api.nvim_win_set_cursor(0, { 1, 6 })
+  require("pinwords").set(1, { raw = "foo", whole_word = false })
+  local unmap = map_jump_keys()
+
+  vim.cmd([[execute "normal \<Plug>(test-prev)x"]])
+  unmap()
+
+  MiniTest.expect.equality(vim.api.nvim_buf_get_lines(0, 0, -1, false), { "oo---foo" })
+  MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), { 1, 0 })
+end
+
+T["consecutive jumps to different slots run in order"] = function()
+  helpers.setup_buffer({ "start foo bar foo bar" })
+  local pinwords = require("pinwords")
+  pinwords.set(1, { raw = "foo" })
+  pinwords.set(2, { raw = "bar" })
+  local unmap = map_jump_keys()
+
+  vim.cmd([[execute "normal \<Plug>(test-next-1)\<Plug>(test-next-2)"]])
+  unmap()
+
+  MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), { 1, 10 }) -- first "bar"
+end
+
+T["jump inside a macro keeps the recorded key order"] = function()
+  helpers.setup_buffer({ "foo---foo---foo" })
+  require("pinwords").set(1, { raw = "foo", whole_word = false })
+  local unmap = map_jump_keys()
+
+  vim.fn.setreg("q", vim.api.nvim_replace_termcodes("<Plug>(test-next)x", true, false, true))
+  vim.cmd("normal 2@q")
+  unmap()
+
+  MiniTest.expect.equality(vim.api.nvim_buf_get_lines(0, 0, -1, false), { "foo---oo---oo" })
+end
+
+T["counted jump records only the starting position"] = function()
+  helpers.setup_buffer({ "foo", "bar", "foo", "bar", "foo" })
+  vim.cmd("clearjumps")
+  require("pinwords").set(1, { raw = "foo" })
+  local unmap = map_jump_keys()
+
+  vim.cmd([[execute "normal 2\<Plug>(test-next)"]])
+  unmap()
+
+  MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), { 5, 0 })
+  local jumps = vim.fn.getjumplist()[1]
+  MiniTest.expect.equality(#jumps, 1)
+  MiniTest.expect.equality(jumps[1].lnum, 1)
+end
+
+T["failed jump adds no jumplist entry"] = function()
+  helpers.setup_buffer({ "foo", "bar" })
+  vim.api.nvim_win_set_cursor(0, { 2, 0 })
+  vim.cmd("clearjumps")
+
+  local pinwords = require("pinwords")
+  pinwords.set(1, { raw = "baz" })
+
+  local orig_notify = vim.notify
+  vim.notify = function() end
+  local success = pinwords.jump_next()
+  vim.notify = orig_notify
+
+  MiniTest.expect.equality(success, false)
+  -- Leave the line so a recorded entry would not be merged with the cursor.
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
+  MiniTest.expect.equality(#vim.fn.getjumplist()[1], 0)
+end
+
 return T
