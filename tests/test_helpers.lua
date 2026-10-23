@@ -178,6 +178,22 @@ function M.spy_timers(func)
   return records
 end
 
+---Temporarily replace package.loaded[module_name] while fn runs.
+---@param module_name string
+---@param value any
+---@param fn fun()
+function M.with_loaded_module(module_name, value, fn)
+  local previous = package.loaded[module_name]
+  package.loaded[module_name] = value
+
+  local ok, err = pcall(fn)
+  package.loaded[module_name] = previous
+
+  if not ok then
+    error(err)
+  end
+end
+
 ---@param func function
 ---@return any
 function M.with_notify_override(func)
