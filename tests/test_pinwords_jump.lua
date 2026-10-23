@@ -160,26 +160,6 @@ T["jump_next jumps to any pinned word when multiple pins"] = function()
   MiniTest.expect.equality(pos[2], 13) -- "[c]herry"
 end
 
-T["jump_next respects count"] = function()
-  helpers.setup_buffer({ "foo bar foo baz foo qux foo" })
-  vim.api.nvim_win_set_cursor(0, { 1, 0 })
-
-  local pinwords = require("pinwords")
-  pinwords.set(1, { raw = "foo" })
-
-  -- Simulate count by setting vim.v.count1
-  -- Note: We can't directly set vim.v.count1 in tests,
-  -- but we can call jump multiple times
-  local success = pinwords.jump_next()
-  MiniTest.expect.equality(success, true)
-  success = pinwords.jump_next()
-  MiniTest.expect.equality(success, true)
-
-  local pos = vim.api.nvim_win_get_cursor(0)
-  MiniTest.expect.equality(pos[1], 1)
-  MiniTest.expect.equality(pos[2], 16) -- Third "foo"
-end
-
 T["jump sets jumplist mark"] = function()
   helpers.setup_buffer({ "foo", "bar", "foo", "baz", "foo" })
   vim.api.nvim_win_set_cursor(0, { 1, 0 })

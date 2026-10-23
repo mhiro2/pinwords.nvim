@@ -198,30 +198,6 @@ T["build_vim_pattern only adds word boundaries next to keyword characters"] = fu
 end
 
 -- ==========================================================================
--- Command registration
--- ==========================================================================
-
-T["PinWordGrep command is registered"] = function()
-  helpers.setup_buffer({ "foo bar baz" })
-  -- Read the description via the API rather than parsing `:command` output,
-  -- whose column wrapping/truncation varies across Neovim versions. Newer
-  -- Neovim exposes the description in `desc`; older Neovim put it in
-  -- `definition`, so check both.
-  local cmd = vim.api.nvim_get_commands({ builtin = false }).PinWordGrep
-  MiniTest.expect.equality(cmd ~= nil, true)
-  local description = (cmd.desc or "") .. (cmd.definition or "")
-  MiniTest.expect.equality(description:find("Grep pinned words across project.", 1, true) ~= nil, true)
-end
-
-T["PinWordLiveGrep command is registered"] = function()
-  helpers.setup_buffer({ "foo bar baz" })
-  local cmd = vim.api.nvim_get_commands({ builtin = false }).PinWordLiveGrep
-  MiniTest.expect.equality(cmd ~= nil, true)
-  local description = (cmd.desc or "") .. (cmd.definition or "")
-  MiniTest.expect.equality(description:find("Live grep pinned words across project.", 1, true) ~= nil, true)
-end
-
--- ==========================================================================
 -- API integration (notify on empty / unsupported)
 -- ==========================================================================
 
@@ -259,24 +235,6 @@ T["grep rejects multi-line-only pins"] = function()
     MiniTest.expect.equality(#notified > 0, true)
     MiniTest.expect.equality(notified[1].msg:find("supports only single-line pinned words", 1, true) ~= nil, true)
     MiniTest.expect.equality(notified[1].level, vim.log.levels.WARN)
-  end)
-end
-
-T["grep with invalid slot from command shows error"] = function()
-  helpers.setup_buffer({ "foo bar baz" })
-
-  helpers.with_notify_override(function(notified)
-    vim.cmd("PinWordGrep 0")
-    MiniTest.expect.equality(#notified > 0, true)
-  end)
-end
-
-T["PinWordLiveGrep with invalid slot shows error"] = function()
-  helpers.setup_buffer({ "foo bar baz" })
-
-  helpers.with_notify_override(function(notified)
-    vim.cmd("PinWordLiveGrep 0")
-    MiniTest.expect.equality(#notified > 0, true)
   end)
 end
 

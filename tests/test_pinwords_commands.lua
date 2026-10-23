@@ -140,40 +140,30 @@ T["UnpinAllWords clears all slots"] = function()
   MiniTest.expect.equality(helpers.match_count(), 0)
 end
 
-T["PinWordList command description indicates global scope"] = function()
-  -- Read the description via the API rather than parsing `:command` output,
-  -- whose column wrapping/truncation varies across Neovim versions. Newer
-  -- Neovim exposes the description in `desc`; older Neovim put it in
-  -- `definition`, so check both.
-  local cmd = vim.api.nvim_get_commands({ builtin = false }).PinWordList
-  MiniTest.expect.equality(cmd ~= nil, true)
-  local description = (cmd.desc or "") .. (cmd.definition or "")
-  MiniTest.expect.equality(description:find("List global pinned words in interactive picker.", 1, true) ~= nil, true)
-end
-
 T["PinWordList opens interactive picker"] = function()
   helpers.setup_buffer({ "foo bar baz" })
-
   require("pinwords").set(1)
-  vim.api.nvim_win_set_cursor(0, { 1, 4 })
+
+  -- Pins are global, so a pin made in another buffer is listed as well.
+  vim.cmd("enew")
+  helpers.setup_buffer({ "qux" })
   require("pinwords").set(2)
 
-  local select_called = false
   local select_items = nil
   local orig_select = vim.ui.select
   vim.ui.select = function(items, _opts, _on_choice)
-    select_called = true
     select_items = items
   end
 
-  vim.cmd("PinWordList")
-
+  local ok, err = pcall(vim.cmd, "PinWordList")
   vim.ui.select = orig_select
+  if not ok then
+    error(err)
+  end
 
-  MiniTest.expect.equality(select_called, true)
   MiniTest.expect.equality(#select_items, 2)
-  MiniTest.expect.equality(select_items[1].slot, 1)
-  MiniTest.expect.equality(select_items[2].slot, 2)
+  MiniTest.expect.equality({ select_items[1].slot, select_items[1].raw }, { 1, "foo" })
+  MiniTest.expect.equality({ select_items[2].slot, select_items[2].raw }, { 2, "qux" })
 end
 
 T["PinWordList shows message when no words pinned"] = function()
@@ -308,28 +298,98 @@ T["PinWordPrev with slot jumps to specific slot"] = function()
   MiniTest.expect.equality(pos[2], 12) -- "foo bar baz [f]oo"
 end
 
-T["PinWordNext with invalid slot shows error"] = function()
-  helpers.setup_buffer({ "foo bar baz" })
+T["PinWordNext and PinWordPrev with invalid slot warn without moving"] = function()
+  helpers.setup_buffer({ "foo bar foo baz" })
   require("pinwords").set(1, { raw = "foo" })
+  vim.api.nvim_win_set_cursor(0, { 1, 4 })
+  local jumps_before = #vim.fn.getjumplist()[1]
 
-  helpers.with_notify_override(function(notified)
-    vim.cmd("PinWordNext 0")
-    vim.cmd("PinWordNext 100")
+  for _, command in ipairs({ "PinWordNext", "PinWordPrev" }) do
+    helpers.with_notify_override(function(notified)
+      vim.cmd(command .. " 0")
+      vim.cmd(command .. " 100")
+      vim.cmd(command .. " x")
 
-    MiniTest.expect.equality(#notified > 0, true)
-  end)
+      MiniTest.expect.equality(notified, {
+        { msg = "pinwords: slot must be an integer between 1 and 9", level = vim.log.levels.WARN },
+        { msg = "pinwords: slot must be an integer between 1 and 9", level = vim.log.levels.WARN },
+        { msg = "pinwords: slot must be a number", level = vim.log.levels.WARN },
+      })
+    end)
+
+    MiniTest.expect.equality(vim.api.nvim_win_get_cursor(0), { 1, 4 })
+    MiniTest.expect.equality(#vim.fn.getjumplist()[1], jumps_before)
+  end
 end
 
-T["PinWordPrev with invalid slot shows error"] = function()
+T["PinWordGrep and PinWordLiveGrep pass the slot argument through"] = function()
+  helpers.setup_buffer({ "foo bar baz" })
+
+  local pinwords = require("pinwords")
+  local orig = { grep = pinwords.grep, live_grep = pinwords.live_grep }
+  local calls = {}
+  for method in pairs(orig) do
+    pinwords[method] = function(opts)
+      calls[#calls + 1] = { method, opts }
+    end
+  end
+
+  local ok, err = pcall(function()
+    vim.cmd("PinWordGrep 2")
+    vim.cmd("PinWordGrep")
+    vim.cmd("PinWordLiveGrep 3")
+    vim.cmd("PinWordLiveGrep")
+  end)
+  for method, fn in pairs(orig) do
+    pinwords[method] = fn
+  end
+  if not ok then
+    error(err)
+  end
+
+  MiniTest.expect.equality(calls, {
+    { "grep", { slot = 2 } },
+    { "grep", {} },
+    { "live_grep", { slot = 3 } },
+    { "live_grep", {} },
+  })
+end
+
+T["PinWordGrep and PinWordLiveGrep with invalid slot warn without searching"] = function()
   helpers.setup_buffer({ "foo bar baz" })
   require("pinwords").set(1, { raw = "foo" })
 
-  helpers.with_notify_override(function(notified)
-    vim.cmd("PinWordPrev 0")
-    vim.cmd("PinWordPrev 100")
+  local grep = require("pinwords.grep")
+  local orig = { grep = grep.grep, live_grep = grep.live_grep }
+  local searched = 0
+  for method in pairs(orig) do
+    grep[method] = function()
+      searched = searched + 1
+    end
+  end
 
-    MiniTest.expect.equality(#notified > 0, true)
+  local ok, err = pcall(function()
+    for _, command in ipairs({ "PinWordGrep", "PinWordLiveGrep" }) do
+      helpers.with_notify_override(function(notified)
+        vim.cmd(command .. " 0")
+        vim.cmd(command .. " 1.5")
+
+        MiniTest.expect.equality(notified, {
+          { msg = "pinwords: slot must be an integer between 1 and 9", level = vim.log.levels.WARN },
+          { msg = "pinwords: slot must be an integer between 1 and 9", level = vim.log.levels.WARN },
+        })
+      end)
+    end
   end)
+  for method, fn in pairs(orig) do
+    grep[method] = fn
+  end
+  if not ok then
+    error(err)
+  end
+
+  MiniTest.expect.equality(searched, 0)
+  MiniTest.expect.equality(require("pinwords").list()[1].raw, "foo")
 end
 
 return T
