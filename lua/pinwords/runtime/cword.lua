@@ -57,16 +57,23 @@ local function clear_all_timers()
   end
 end
 
+-- Both the word under the cursor and its keyword boundaries depend on the
+-- buffer's 'iskeyword', so the pattern is built inside the target window rather
+-- than in whichever window has focus when the debounce timer fires.
 ---@param win integer
----@return string
-local function get_cword_for_window(win)
-  local ok, raw = pcall(vim.api.nvim_win_call, win, function()
-    return vim.fn.expand("<cword>")
+---@return string|nil
+local function get_cword_pattern_for_window(win)
+  local ok, pattern_text = pcall(vim.api.nvim_win_call, win, function()
+    local raw = vim.fn.expand("<cword>")
+    if raw == "" then
+      return nil
+    end
+    return config.build_pattern(raw)
   end)
-  if not ok or type(raw) ~= "string" then
-    return ""
+  if not ok or type(pattern_text) ~= "string" then
+    return nil
   end
-  return raw
+  return pattern_text
 end
 
 ---@param win integer
@@ -98,8 +105,7 @@ local function update_for_window(win)
     return
   end
 
-  local raw = get_cword_for_window(win)
-  local pattern_text = raw ~= "" and config.build_pattern(raw) or nil
+  local pattern_text = get_cword_pattern_for_window(win)
 
   if cword_state.pattern == pattern_text then
     return
