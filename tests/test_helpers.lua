@@ -110,6 +110,21 @@ function M.clear_hl(name)
   vim.cmd("hi clear " .. name)
 end
 
+---Run func with a fixed Normal background so blended highlight colors are deterministic.
+---@param bg integer
+---@param func function
+function M.with_normal_bg(bg, func)
+  local orig_normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
+  vim.api.nvim_set_hl(0, "Normal", { bg = bg })
+
+  local ok, err = pcall(func)
+  vim.api.nvim_set_hl(0, "Normal", orig_normal)
+
+  if not ok then
+    error(err)
+  end
+end
+
 ---@param func function
 ---@return any
 function M.with_notify_override(func)

@@ -182,6 +182,7 @@ T["setup with invalid config falls back to defaults"] = function()
   helpers.setup_buffer({ "foo bar" })
 
   local pinwords = require("pinwords")
+  local defaults = require("pinwords.config").default_config()
 
   helpers.with_notify_override(function(notified)
     pinwords.setup({
@@ -191,14 +192,29 @@ T["setup with invalid config falls back to defaults"] = function()
       auto_allocation = "not a table",
     })
 
-    MiniTest.expect.equality(#notified > 0, true)
-
-    local slots = pinwords.list()
-    MiniTest.expect.equality(next(slots), nil)
-
-    pinwords.set(1)
-    MiniTest.expect.equality(pinwords.list()[1].raw, "foo")
+    local messages = {}
+    for _, n in ipairs(notified) do
+      messages[#messages + 1] = n.msg
+    end
+    MiniTest.expect.equality(messages, {
+      "pinwords: slots must be a positive integer; fallback to default",
+      "pinwords: whole_word must be boolean; fallback to default",
+      "pinwords: case_sensitive must be boolean; fallback to default",
+      "pinwords: auto_allocation must be a table; fallback to default",
+    })
   end)
+
+  local cfg = pinwords.get_config()
+  MiniTest.expect.equality(cfg.slots, defaults.slots)
+  MiniTest.expect.equality(cfg.whole_word, defaults.whole_word)
+  MiniTest.expect.equality(cfg.case_sensitive, defaults.case_sensitive)
+  MiniTest.expect.equality(cfg.auto_allocation, defaults.auto_allocation)
+
+  -- The default whole_word/case_sensitive pair is what a plain pin uses.
+  pinwords.set(9)
+  MiniTest.expect.equality(pinwords.list()[9].raw, "foo")
+  MiniTest.expect.equality(pinwords.list()[9].pattern, "\\V\\c\\<foo\\>")
+  MiniTest.expect.equality(helpers.find_match("PinWord9").pattern, "\\V\\c\\<foo\\>")
 end
 
 T["setup with invalid auto_allocation falls back to defaults"] = function()
@@ -208,6 +224,7 @@ T["setup with invalid auto_allocation falls back to defaults"] = function()
 
   helpers.with_notify_override(function(notified)
     pinwords.setup({
+      slots = 2,
       auto_allocation = {
         strategy = "invalid_strategy",
         on_full = "invalid_on_full",
@@ -215,41 +232,64 @@ T["setup with invalid auto_allocation falls back to defaults"] = function()
       },
     })
 
-    MiniTest.expect.equality(#notified > 0, true)
-
-    local slots = pinwords.list()
-    MiniTest.expect.equality(next(slots), nil)
-
-    pinwords.set()
-    MiniTest.expect.equality(pinwords.list()[1].raw, "foo")
+    MiniTest.expect.equality(#notified, 3)
   end)
+
+  MiniTest.expect.equality(pinwords.get_config().auto_allocation, {
+    strategy = "first_empty",
+    on_full = "replace_oldest",
+    toggle_same = true,
+  })
+
+  -- first_empty fills slot 2 after slot 1, replace_oldest then evicts slot 1.
+  pinwords.set(nil, { raw = "a" })
+  pinwords.set(nil, { raw = "b" })
+  pinwords.set(nil, { raw = "c" })
+  MiniTest.expect.equality(pinwords.list()[1].raw, "c")
+  MiniTest.expect.equality(pinwords.list()[2].raw, "b")
+
+  -- toggle_same unpins the same word again.
+  pinwords.set(nil, { raw = "c" })
+  MiniTest.expect.equality(pinwords.list()[1], nil)
 end
 
 T["setup merges partial config with defaults"] = function()
   helpers.setup_buffer({ "foo bar" })
 
   local pinwords = require("pinwords")
+  local defaults = require("pinwords.config").default_config()
 
   pinwords.setup({
-    slots = 5,
+    slots = 3,
     auto_allocation = {
       strategy = "cycle",
     },
   })
 
+  local cfg = pinwords.get_config()
+  MiniTest.expect.equality(cfg.slots, 3)
+  MiniTest.expect.equality(cfg.auto_allocation, {
+    strategy = "cycle",
+    on_full = defaults.auto_allocation.on_full,
+    toggle_same = defaults.auto_allocation.toggle_same,
+  })
+  MiniTest.expect.equality(cfg.whole_word, defaults.whole_word)
+  MiniTest.expect.equality(cfg.flash, defaults.flash)
+
   pinwords.set(nil, { raw = "a" })
   pinwords.set(nil, { raw = "b" })
+  pinwords.clear(1)
+
+  -- cycle continues after the last used slot instead of reusing the hole in slot 1.
   pinwords.set(nil, { raw = "c" })
+  MiniTest.expect.equality(pinwords.list()[3].raw, "c")
+  MiniTest.expect.equality(pinwords.list()[1], nil)
 
-  local slots = pinwords.list()
-  MiniTest.expect.equality(slots[1].raw, "a")
-  MiniTest.expect.equality(slots[2].raw, "b")
-  MiniTest.expect.equality(slots[3].raw, "c")
-
+  -- The cycle wraps back to slot 1, then the default on_full replaces the oldest slot.
   pinwords.set(nil, { raw = "d" })
-
-  local slots2 = pinwords.list()
-  MiniTest.expect.equality(slots2[4].raw, "d")
+  MiniTest.expect.equality(pinwords.list()[1].raw, "d")
+  pinwords.set(nil, { raw = "e" })
+  MiniTest.expect.equality(pinwords.list()[2].raw, "e")
 end
 
 T["setup creates autocmd group"] = function()
