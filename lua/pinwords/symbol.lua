@@ -59,12 +59,19 @@ function M.get_symbol_at_cursor(bufnr, winnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   winnr = winnr or vim.api.nvim_get_current_win()
 
-  if not M.has_parser(bufnr) then
+  local ok_parser, parser = pcall(vim.treesitter.get_parser, bufnr)
+  if not ok_parser or not parser then
     return nil
   end
 
   local cursor = vim.api.nvim_win_get_cursor(winnr)
   local row, col = cursor[1] - 1, cursor[2]
+
+  -- A buffer without an active highlighter has never been parsed, and
+  -- get_node() finds no tree until it is.
+  pcall(function()
+    parser:parse({ row, row + 1 })
+  end)
 
   local ok, node = pcall(vim.treesitter.get_node, { bufnr = bufnr, pos = { row, col } })
   if not ok or not node then

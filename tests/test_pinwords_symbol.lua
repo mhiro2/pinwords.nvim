@@ -402,48 +402,37 @@ end
 -- Real Treesitter tests (skipped if lua parser not available)
 -- ============================================================================
 
-T["real TS: extracts function name in Lua"] = function()
-  local parser = vim.treesitter.get_parser(0, "lua")
-  if not parser then
+local LUA_LINES = {
+  "local function myFunc(a)",
+  "  foo(42, bar, 'str') -- note",
+  "end",
+  "function M.method() end",
+}
+
+---@return boolean
+local function setup_lua_buffer()
+  if not vim.treesitter.language.add("lua") then
     MiniTest.skip("lua treesitter parser not available")
-    return
+    return false
   end
 
-  helpers.setup_buffer({ "local function calculate_total(x, y)", "  return x + y", "end" })
+  -- pre_case opens a fresh buffer, so nothing has parsed it yet.
+  helpers.setup_buffer(LUA_LINES)
   vim.bo.filetype = "lua"
-
-  -- Force parse to ensure tree is available
-  parser = vim.treesitter.get_parser(0, "lua")
-  parser:parse()
-
-  -- Cursor on function name
-  vim.api.nvim_win_set_cursor(0, { 1, 16 })
-  local symbol = require("pinwords.symbol")
-  local result = symbol.get_symbol_at_cursor()
-  MiniTest.expect.equality(result, "calculate_total")
+  return true
 end
 
-T["real TS: extracts identifier from keyword position in Lua"] = function()
-  local parser = vim.treesitter.get_parser(0, "lua")
-  if not parser then
-    MiniTest.skip("lua treesitter parser not available")
+T["real TS: PinWordSymbol on an unparsed buffer pins the declared name"] = function()
+  if not setup_lua_buffer() then
     return
   end
+  MiniTest.expect.equality(vim.treesitter.get_node({ bufnr = 0, pos = { 0, 6 } }), nil)
 
-  helpers.setup_buffer({ "local function myFunc()", "end" })
-  vim.bo.filetype = "lua"
-
-  parser = vim.treesitter.get_parser(0, "lua")
-  parser:parse()
-
-  -- Cursor on "function" keyword
+  -- Cursor on the "function" keyword.
   vim.api.nvim_win_set_cursor(0, { 1, 6 })
-  local symbol = require("pinwords.symbol")
-  local result = symbol.get_symbol_at_cursor()
+  vim.cmd("PinWordSymbol 1")
 
-  -- Should find "myFunc" (the identifier child of function_definition),
-  -- not the "function" keyword itself.
-  MiniTest.expect.equality(result, "myFunc")
+  MiniTest.expect.equality(require("pinwords").list()[1].raw, "myFunc")
 end
 
 return T
