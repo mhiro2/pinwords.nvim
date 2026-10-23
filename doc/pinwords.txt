@@ -92,6 +92,8 @@ COMMANDS                                                       *pinwords-command
 
   :PinWord              Auto pin (toggle same). Visual range pins selection.
   :PinWord {slot}        Pin word under cursor (visual range pins selection).
+                         Only a '<,'> range uses the selection; a typed line
+                         range such as :1,3PinWord pins the word under cursor.
   :PinWordSymbol         Pin symbol at cursor using Treesitter (auto allocation).
   :PinWordSymbol {slot}  Pin symbol at cursor to specific slot.
                          Falls back to cword when no parser or no symbol found.

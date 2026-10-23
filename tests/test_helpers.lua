@@ -93,6 +93,13 @@ function M.feed_normal(keys)
   vim.cmd(string.format('execute "normal! %s"', keys))
 end
 
+---Feed keys through the typeahead so mode changes and command-line events fire
+---as they do for real input.
+---@param keys string Key notation, e.g. "vll:PinWord<CR>"
+function M.feed_keys(keys)
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(keys, true, false, true), "xt", false)
+end
+
 ---@return integer
 function M.match_count()
   local count = 0

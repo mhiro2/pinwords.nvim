@@ -62,18 +62,15 @@ end
 T["PinWord with line range does not use stale visual marks"] = function()
   helpers.setup_buffer({ "foo bar", "baz qux" })
 
-  -- Set stale visual marks on line 2 ("baz")
-  helpers.set_visual_marks(2, 1, 2, 3)
+  -- Leave a selection of "foo" on line 1, then move to "bar" on the same line.
+  helpers.feed_keys("vll<Esc>")
+  vim.api.nvim_win_set_cursor(0, { 1, 4 })
 
-  -- Use a line-range call (not '<,'>); it should pin <cword>, not stale selection.
-  vim.cmd("1,1PinWord")
+  helpers.feed_keys(":1,1PinWord<CR>")
 
   local slots = require("pinwords").list()
-  MiniTest.expect.equality(slots[1].raw, "foo")
-
-  local match = helpers.find_match("PinWord1")
-  MiniTest.expect.equality(match ~= nil, true)
-  MiniTest.expect.equality(match.pattern, "\\V\\c\\<foo\\>")
+  MiniTest.expect.equality(slots[1].raw, "bar")
+  MiniTest.expect.equality(helpers.find_match("PinWord1").pattern, "\\V\\c\\<bar\\>")
 end
 
 T["UnpinWord without slot clears word under cursor"] = function()
