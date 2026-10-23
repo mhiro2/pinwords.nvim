@@ -165,6 +165,12 @@ function M.get()
   if mode == "" then
     mode = "v"
   end
+  -- A block is a column of separate pieces; a single pattern cannot highlight
+  -- only those pieces, so the selection is refused instead of pinning text that
+  -- never matches.
+  if mode == "\22" then
+    return nil, "blockwise selection is not supported"
+  end
 
   local ok, lines = pcall(vim.fn.getregion, start_pos, end_pos, { type = mode })
   if not ok or type(lines) ~= "table" then

@@ -197,7 +197,7 @@ See the [Picker Integrations](#-picker-integrations) section for usage details.
 | Command                 | Description           |
 | ----------------------- | --------------------- |
 | `:PinWord`              | Auto pin (toggle same). In visual mode, pins selection. |
-| `:PinWord {slot}`       | Pin word under cursor (visual mode uses selection). |
+| `:PinWord {slot}`       | Pin word under cursor (visual mode uses selection; blockwise selections are not supported). |
 | `:PinWordSymbol`        | Pin symbol at cursor using Treesitter (auto allocation). |
 | `:PinWordSymbol {slot}` | Pin symbol at cursor to specific slot. Falls back to cword when no parser or no symbol found. |
 | `:UnpinWord`            | Unpin word under cursor (warns when multiple slots share the same raw text) |

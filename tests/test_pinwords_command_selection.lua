@@ -90,11 +90,19 @@ T["selection honors exclusive selection"] = function()
   MiniTest.expect.equality(result, "ab")
 end
 
-T["selection extracts blockwise regions"] = function()
+T["PinWord refuses a blockwise selection"] = function()
   helpers.setup_buffer({ "abcde", "fghij" })
-  helpers.feed_normal([[ggl\<C-v>jll\<Esc>]])
 
-  MiniTest.expect.equality(selection.get(), "bcd\nghi")
+  helpers.with_notify_override(function(notified)
+    helpers.feed_keys("gglj<C-v>ll:PinWord 1<CR>")
+
+    MiniTest.expect.equality(#notified, 1)
+    MiniTest.expect.equality(notified[1].msg, "pinwords: blockwise selection is not supported")
+    MiniTest.expect.equality(notified[1].level, vim.log.levels.WARN)
+  end)
+
+  MiniTest.expect.equality(next(require("pinwords").list()), nil)
+  MiniTest.expect.equality(helpers.match_count(), 0)
 end
 
 T["selection extracts linewise regions"] = function()
