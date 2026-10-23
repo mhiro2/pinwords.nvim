@@ -38,52 +38,50 @@ local function feed_until(keys, cond)
   vim.wait(2000, cond)
 end
 
-T["telescope extension loads successfully"] = function()
-  local ok, _result = pcall(require, "telescope._extensions.pinwords")
-
-  MiniTest.expect.equality(ok, true)
-end
-
-T["telescope extension is registered"] = function()
+T["telescope extension registers the pinwords picker"] = function()
   local telescope = require("telescope")
 
-  -- Load the extension
-  pcall(telescope.load_extension, "pinwords")
-
-  -- Check that the extension is registered
-  local extensions = telescope.extensions or {}
-  MiniTest.expect.equality(type(extensions), "table")
+  local ok, err = pcall(telescope.load_extension, "pinwords")
+  MiniTest.expect.equality(ok, true, err)
+  MiniTest.expect.equality(type(telescope.extensions.pinwords.pinwords), "function")
 end
 
-T["pinwords list works correctly"] = function()
+T["telescope entries expose the slot and are searchable"] = function()
   helpers.setup_buffer({ "foo bar baz" })
 
   local pinwords = require("pinwords")
-
-  -- Pin some words
-  pinwords.set(1)
-  vim.api.nvim_win_set_cursor(0, { 1, 5 }) -- Move to "bar"
-  pinwords.set(2)
-
-  local slots = pinwords.list()
-  MiniTest.expect.equality(slots[1].raw, "foo")
-  MiniTest.expect.equality(slots[2].raw, "bar")
-end
-
-T["pinwords entries have required fields"] = function()
-  helpers.setup_buffer({ "foo bar baz" })
-
-  local pinwords = require("pinwords")
-
+  vim.api.nvim_win_set_cursor(0, { 1, 8 })
+  pinwords.set(3)
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
   pinwords.set(1)
 
-  local slots = pinwords.list()
-  MiniTest.expect.equality(type(slots[1]), "table")
-  MiniTest.expect.equality(type(slots[1].raw), "string")
-  MiniTest.expect.equality(type(slots[1].pattern), "string")
-  MiniTest.expect.equality(type(slots[1].hl_group), "string")
-  MiniTest.expect.equality(slots[1].raw, "foo")
-  MiniTest.expect.equality(slots[1].hl_group, "PinWord1")
+  open_picker()
+
+  local action_state = require("telescope.actions.state")
+  local picker = action_state.get_current_picker(vim.api.nvim_get_current_buf())
+  -- Entries as produced by the extension's entry maker inside the real finder.
+  local entries = { unpack(picker.finder.results) }
+  table.sort(entries, function(a, b)
+    return a.value.slot < b.value.slot
+  end)
+  -- The displayer needs the open picker's layout.
+  local display, highlights = entries[2].display(entries[2])
+  -- Score with the sorter the extension configured for this picker.
+  local sorter = picker.sorter
+  require("telescope.actions").close(vim.api.nvim_get_current_buf())
+
+  MiniTest.expect.equality(#entries, 2)
+  MiniTest.expect.equality({ entries[1].value.slot, entries[1].value.raw }, { 1, "foo" })
+  MiniTest.expect.equality({ entries[2].value.slot, entries[2].value.raw }, { 3, "baz" })
+  MiniTest.expect.equality(entries[1].ordinal, "1 foo")
+  MiniTest.expect.equality(entries[2].ordinal, "3 baz")
+
+  MiniTest.expect.equality(vim.trim(display), "3:  baz")
+  MiniTest.expect.equality(highlights[2][2], "PinWord3")
+
+  -- The picker's sorter keeps the pin whose ordinal matches the prompt.
+  MiniTest.expect.equality(sorter:scoring_function("baz", entries[2].ordinal) >= 0, true)
+  MiniTest.expect.equality(sorter:scoring_function("baz", entries[1].ordinal), -1)
 end
 
 T["telescope <C-d> unpins selected entry"] = function()

@@ -3,38 +3,6 @@ local helpers = require("tests.test_helpers")
 
 local T = helpers.create_test_set()
 
----@param module_name string
----@param value any
----@param fn fun()
-local function with_loaded_module(module_name, value, fn)
-  local previous = package.loaded[module_name]
-  package.loaded[module_name] = value
-
-  local ok, err = pcall(fn)
-  package.loaded[module_name] = previous
-
-  if not ok then
-    error(err)
-  end
-end
-
-T["pick() falls back to vim.ui.select when no picker enabled"] = function()
-  helpers.setup_buffer({ "foo bar baz" })
-
-  require("pinwords").set(1)
-
-  local select_called = false
-  local orig_select = vim.ui.select
-  vim.ui.select = function(_items, _opts, _on_choice)
-    select_called = true
-  end
-
-  require("pinwords").pick()
-
-  vim.ui.select = orig_select
-  MiniTest.expect.equality(select_called, true)
-end
-
 T["pick() notifies when no pinned words"] = function()
   helpers.setup_buffer({ "foo bar baz" })
 
@@ -46,26 +14,26 @@ T["pick() notifies when no pinned words"] = function()
   end)
 end
 
-T["pick() vim.ui.select unpins on selection"] = function()
+T["pick() vim.ui.select unpins only the chosen entry"] = function()
   helpers.setup_buffer({ "foo bar baz" })
 
   local pinwords = require("pinwords")
   pinwords.set(1)
+  vim.api.nvim_win_set_cursor(0, { 1, 4 })
+  pinwords.set(2)
 
-  local orig_select = vim.ui.select
-  vim.ui.select = function(items, _opts, on_choice)
+  helpers.with_select_override(function(items, _opts, on_choice)
     on_choice(items[1])
-  end
-
-  pinwords.pick()
-
-  vim.ui.select = orig_select
+  end, pinwords.pick)
 
   local slots = pinwords.list()
   MiniTest.expect.equality(slots[1], nil)
+  MiniTest.expect.equality(slots[2].raw, "bar")
+  MiniTest.expect.equality(helpers.find_match("PinWord1"), nil)
+  MiniTest.expect.equality(helpers.find_match("PinWord2").pattern, "\\V\\c\\<bar\\>")
 end
 
-T["pick() vim.ui.select items are sorted by slot"] = function()
+T["pick() falls back to vim.ui.select with items sorted by slot"] = function()
   helpers.setup_buffer({ "foo bar baz" })
 
   local pinwords = require("pinwords")
@@ -74,19 +42,16 @@ T["pick() vim.ui.select items are sorted by slot"] = function()
   vim.api.nvim_win_set_cursor(0, { 1, 0 })
   pinwords.set(1)
 
-  local select_items = nil
-  local orig_select = vim.ui.select
-  vim.ui.select = function(items, _opts, _on_choice)
+  local select_items, select_opts
+  helpers.with_select_override(function(items, opts)
     select_items = items
-  end
-
-  pinwords.pick()
-
-  vim.ui.select = orig_select
+    select_opts = opts
+  end, pinwords.pick)
 
   MiniTest.expect.equality(#select_items, 2)
   MiniTest.expect.equality(select_items[1].slot, 1)
   MiniTest.expect.equality(select_items[2].slot, 3)
+  MiniTest.expect.equality(select_opts.format_item(select_items[2]), "3: baz")
 end
 
 T["pick() vim.ui.select no-op on cancel"] = function()
@@ -95,14 +60,9 @@ T["pick() vim.ui.select no-op on cancel"] = function()
   local pinwords = require("pinwords")
   pinwords.set(1)
 
-  local orig_select = vim.ui.select
-  vim.ui.select = function(_items, _opts, on_choice)
+  helpers.with_select_override(function(_items, _opts, on_choice)
     on_choice(nil)
-  end
-
-  pinwords.pick()
-
-  vim.ui.select = orig_select
+  end, pinwords.pick)
 
   local slots = pinwords.list()
   MiniTest.expect.equality(slots[1].raw, "foo")
@@ -116,17 +76,14 @@ T["pick() falls back when snacks module is non-table"] = function()
   pinwords.set(1)
 
   local select_called = false
-  local orig_select = vim.ui.select
-  vim.ui.select = function(_items, _opts, _on_choice)
+  helpers.with_select_override(function()
     select_called = true
-  end
-
-  with_loaded_module("pinwords.snacks", true, function()
-    local ok = pcall(pinwords.pick)
-    MiniTest.expect.equality(ok, true)
+  end, function()
+    helpers.with_loaded_module("pinwords.snacks", true, function()
+      local ok = pcall(pinwords.pick)
+      MiniTest.expect.equality(ok, true)
+    end)
   end)
-
-  vim.ui.select = orig_select
 
   MiniTest.expect.equality(select_called, true)
 end
@@ -139,17 +96,14 @@ T["pick() falls back when fzf_lua module is non-table"] = function()
   pinwords.set(1)
 
   local select_called = false
-  local orig_select = vim.ui.select
-  vim.ui.select = function(_items, _opts, _on_choice)
+  helpers.with_select_override(function()
     select_called = true
-  end
-
-  with_loaded_module("pinwords.fzf_lua", true, function()
-    local ok = pcall(pinwords.pick)
-    MiniTest.expect.equality(ok, true)
+  end, function()
+    helpers.with_loaded_module("pinwords.fzf_lua", true, function()
+      local ok = pcall(pinwords.pick)
+      MiniTest.expect.equality(ok, true)
+    end)
   end)
-
-  vim.ui.select = orig_select
 
   MiniTest.expect.equality(select_called, true)
 end
@@ -166,20 +120,17 @@ T["pick() falls back when telescope extension is unavailable"] = function()
   pinwords.set(1)
 
   local select_called = false
-  local orig_select = vim.ui.select
-  vim.ui.select = function(_items, _opts, _on_choice)
+  helpers.with_select_override(function()
     select_called = true
-  end
-
-  with_loaded_module("telescope", {
-    load_extension = function() end,
-    extensions = {},
-  }, function()
-    local ok = pcall(pinwords.pick)
-    MiniTest.expect.equality(ok, true)
+  end, function()
+    helpers.with_loaded_module("telescope", {
+      load_extension = function() end,
+      extensions = {},
+    }, function()
+      local ok = pcall(pinwords.pick)
+      MiniTest.expect.equality(ok, true)
+    end)
   end)
-
-  vim.ui.select = orig_select
 
   MiniTest.expect.equality(select_called, true)
 end

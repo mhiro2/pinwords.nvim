@@ -194,6 +194,21 @@ function M.with_loaded_module(module_name, value, fn)
   end
 end
 
+---Replace vim.ui.select while fn runs and restore it even when fn fails.
+---@param select fun(items: any[], opts: table, on_choice: fun(item: any|nil))
+---@param fn fun()
+function M.with_select_override(select, fn)
+  local orig_select = vim.ui.select
+  vim.ui.select = select
+
+  local ok, err = pcall(fn)
+  vim.ui.select = orig_select
+
+  if not ok then
+    error(err)
+  end
+end
+
 ---@param func function
 ---@return any
 function M.with_notify_override(func)
