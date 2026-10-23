@@ -13,16 +13,21 @@ T["auto set uses first empty slot"] = function()
 end
 
 T["auto set toggles same word"] = function()
-  helpers.setup_buffer({ "foo bar", "baz" })
+  -- The empty table leaves toggle_same unset so the default is covered as well.
+  for _, opts in ipairs({ {}, { auto_allocation = { toggle_same = true } } }) do
+    local pinwords = require("pinwords")
+    pinwords.setup(opts)
+    MiniTest.expect.equality(pinwords.get_config().auto_allocation.toggle_same, true)
 
-  local pinwords = require("pinwords")
-  pinwords.set()
+    helpers.setup_buffer({ "foo bar", "baz" })
 
-  MiniTest.expect.equality(helpers.match_count() > 0, true)
+    pinwords.set()
+    MiniTest.expect.equality(helpers.match_count(), 1)
 
-  pinwords.set()
-  MiniTest.expect.equality(helpers.match_count(), 0)
-  MiniTest.expect.equality(next(pinwords.list()), nil)
+    pinwords.set()
+    MiniTest.expect.equality(helpers.match_count(), 0)
+    MiniTest.expect.equality(next(pinwords.list()), nil)
+  end
 end
 
 T["auto set replaces oldest when full"] = function()
@@ -124,22 +129,23 @@ T["auto set with no_op does nothing when slots are full"] = function()
   MiniTest.expect.equality(after[3], nil)
 end
 
-T["auto set with toggle_same false does not toggle existing word"] = function()
+T["auto set with toggle_same false pins the same word again in a new slot"] = function()
   local pinwords = require("pinwords")
   pinwords.setup({ auto_allocation = { toggle_same = false } })
 
   helpers.setup_buffer({ "foo bar", "baz" })
 
   pinwords.set()
-  local before = helpers.match_count()
-  MiniTest.expect.equality(before > 0, true)
-
-  -- Should not toggle off, but should add to a different slot or do nothing
   pinwords.set()
-  local after = helpers.match_count()
-  -- With toggle_same=false, it should either add to another slot or keep existing
-  -- Since slots are available, it might add to another slot
-  MiniTest.expect.equality(after >= before, true)
+
+  local slots = pinwords.list()
+  MiniTest.expect.equality(slots[1].raw, "foo")
+  MiniTest.expect.equality(slots[2].raw, "foo")
+  MiniTest.expect.equality(slots[1].pattern, "\\V\\c\\<foo\\>")
+  MiniTest.expect.equality(slots[2].pattern, "\\V\\c\\<foo\\>")
+  MiniTest.expect.equality(helpers.match_count(), 2)
+  MiniTest.expect.equality(helpers.find_match("PinWord1").pattern, "\\V\\c\\<foo\\>")
+  MiniTest.expect.equality(helpers.find_match("PinWord2").pattern, "\\V\\c\\<foo\\>")
 end
 
 T["auto set with toggle_same true keeps same raw with different semantics"] = function()

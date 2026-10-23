@@ -418,35 +418,6 @@ T["set with whole_word option"] = function()
   MiniTest.expect.equality(match2.pattern:find("\\<"), nil)
 end
 
-T["toggle_same toggles existing word"] = function()
-  helpers.setup_buffer({ "foo bar", "baz" })
-
-  local pinwords = require("pinwords")
-  pinwords.setup({ auto_allocation = { toggle_same = true } })
-
-  pinwords.set()
-  MiniTest.expect.equality(helpers.match_count() > 0, true)
-
-  pinwords.set()
-  MiniTest.expect.equality(helpers.match_count(), 0)
-  MiniTest.expect.equality(next(pinwords.list()), nil)
-end
-
-T["toggle_same=false adds duplicate to different slot"] = function()
-  helpers.setup_buffer({ "foo bar", "baz" })
-
-  local pinwords = require("pinwords")
-  pinwords.setup({ auto_allocation = { toggle_same = false } })
-
-  pinwords.set()
-  local before = helpers.match_count()
-
-  pinwords.set()
-  local after = helpers.match_count()
-
-  MiniTest.expect.equality(after >= before, true)
-end
-
 T["unpin finds word by pattern when direct match fails"] = function()
   helpers.setup_buffer({ "foo bar", "baz" })
 

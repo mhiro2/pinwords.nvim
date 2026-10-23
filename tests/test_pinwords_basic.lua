@@ -74,10 +74,16 @@ T["list returns a copy detached from internal state"] = function()
   pinwords.set(1)
 
   local slots = pinwords.list()
+  slots[1].raw = "mutated"
+  slots[1].pattern = "mutated"
+  slots[2] = slots[1]
   slots[1] = nil
 
-  MiniTest.expect.equality(pinwords.list()[1].raw, "foo")
-  MiniTest.expect.equality(helpers.find_match("PinWord1") ~= nil, true)
+  local fresh = pinwords.list()
+  MiniTest.expect.equality(fresh[1].raw, "foo")
+  MiniTest.expect.equality(fresh[1].pattern, "\\V\\c\\<foo\\>")
+  MiniTest.expect.equality(fresh[2], nil)
+  MiniTest.expect.equality(helpers.find_match("PinWord1").pattern, "\\V\\c\\<foo\\>")
 end
 
 T["set with invalid slot does nothing"] = function()

@@ -3,17 +3,6 @@ local helpers = require("tests.test_helpers")
 
 local T = helpers.create_test_set()
 
-T["get_slots returns empty table initially"] = function()
-  helpers.setup_buffer({ "test" })
-
-  local state = require("pinwords.state")
-  state.clear_all()
-
-  local slots = state.get_slots()
-  MiniTest.expect.equality(type(slots), "table")
-  MiniTest.expect.equality(next(slots), nil)
-end
-
 T["set_slot stores entry and syncs to global var"] = function()
   helpers.setup_buffer({ "test" })
 
@@ -228,12 +217,14 @@ T["find_available_slot with cycle strategy wraps around"] = function()
   local state = require("pinwords.state")
   state.clear_all()
 
-  state.set_slot(1, { raw = "a", pattern = "a", hl_group = "PinWord1" })
+  -- Every slot after the last used one is taken, so the search must wrap past the limit.
   state.set_slot(2, { raw = "b", pattern = "b", hl_group = "PinWord2" })
+  state.set_slot(3, { raw = "c", pattern = "c", hl_group = "PinWord3" })
   state.touch_slot(2)
+  state.touch_slot(3)
 
   local slot = state.find_available_slot("cycle", 3)
-  MiniTest.expect.equality(slot, 3)
+  MiniTest.expect.equality(slot, 1)
 end
 
 T["find_available_slot with lru strategy finds empty slot first"] = function()
@@ -506,23 +497,43 @@ T["init_global_state resets state when slot metadata is invalid"] = function()
   MiniTest.expect.equality(next(slots), nil)
 end
 
-T["init_global_state resets state when order or tick metadata is inconsistent"] = function()
-  helpers.setup_buffer({ "test" })
-
-  vim.g.pinwords_global = {
-    slots = {
-      [1] = { raw = "test", pattern = "test", hl_group = "PinWord1", whole_word = true, case_sensitive = true },
-    },
-    order = { 1, 2 }, -- references missing slot 2
-    last_used = { [1] = 3 },
-    tick = 2, -- lower than last_used[1]
-  }
+local function expect_saved_state_reset(saved)
+  vim.g.pinwords_global = saved
 
   local state = require("pinwords.state")
-  state.init_global_state()
+  helpers.with_notify_override(function(notified)
+    state.init_global_state()
+    MiniTest.expect.equality(#notified, 1)
+    MiniTest.expect.equality(notified[1].msg, "pinwords: saved state is invalid, resetting")
+  end)
 
-  local slots = state.get_slots()
-  MiniTest.expect.equality(next(slots), nil)
+  MiniTest.expect.equality(next(state.get_slots()), nil)
+end
+
+local function valid_saved_slot()
+  return { raw = "test", pattern = "test", hl_group = "PinWord1", whole_word = true, case_sensitive = true }
+end
+
+T["init_global_state resets state when order references a missing slot"] = function()
+  helpers.setup_buffer({ "test" })
+
+  expect_saved_state_reset({
+    slots = { [1] = valid_saved_slot() },
+    order = { 1, 2 },
+    last_used = { [1] = 1 },
+    tick = 1,
+  })
+end
+
+T["init_global_state resets state when last_used is ahead of tick"] = function()
+  helpers.setup_buffer({ "test" })
+
+  expect_saved_state_reset({
+    slots = { [1] = valid_saved_slot() },
+    order = { 1 },
+    last_used = { [1] = 3 },
+    tick = 2,
+  })
 end
 
 T["init_global_state keeps state when metadata is consistent"] = function()
@@ -624,7 +635,8 @@ T["find_slot_by_raw_and_pattern does not cross-match entries"] = function()
     hl_group = "PinWord2",
   })
 
-  local slot = state.find_slot_by_raw_and_pattern("baz", "\\V\\c\\<qux\\>")
+  -- raw belongs to slot 1 and pattern to slot 2; only a single entry holding both may match.
+  local slot = state.find_slot_by_raw_and_pattern("foo", "\\V\\c\\<bar\\>")
   MiniTest.expect.equality(slot, nil)
 end
 
