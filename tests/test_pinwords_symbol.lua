@@ -159,54 +159,6 @@ T["get_symbol_at_cursor returns identifier text directly"] = function()
   MiniTest.expect.equality(result, "myFunction")
 end
 
-T["get_symbol_at_cursor finds identifier in children"] = function()
-  helpers.setup_buffer({ "function myFunc()" })
-  local symbol = require("pinwords.symbol")
-  local id_child = make_mock_node("identifier", "myFunc")
-  local keyword_node = make_mock_node("keyword", "function", { id_child })
-  -- keyword_node's parent is a function_definition with the id_child
-  local func_node = make_mock_node("function_definition", "", { keyword_node, id_child })
-  keyword_node._parent = func_node
-
-  local originals = mock_treesitter({
-    get_parser = function()
-      return {}
-    end,
-    get_node = function()
-      return keyword_node
-    end,
-    get_node_text = function(node)
-      return node._text
-    end,
-  })
-  local result = symbol.get_symbol_at_cursor()
-  restore_treesitter(originals)
-  MiniTest.expect.equality(result, "myFunc")
-end
-
-T["get_symbol_at_cursor returns nil for comment node"] = function()
-  helpers.setup_buffer({ "-- this is a comment" })
-  local symbol = require("pinwords.symbol")
-  local comment_node = make_mock_node("comment", "-- this is a comment")
-  -- No parent
-  comment_node._parent = nil
-
-  local originals = mock_treesitter({
-    get_parser = function()
-      return {}
-    end,
-    get_node = function()
-      return comment_node
-    end,
-    get_node_text = function(node)
-      return node._text
-    end,
-  })
-  local result = symbol.get_symbol_at_cursor()
-  restore_treesitter(originals)
-  MiniTest.expect.equality(result, nil)
-end
-
 T["get_symbol_at_cursor returns nil when get_node fails"] = function()
   helpers.setup_buffer({ "hello world" })
   local symbol = require("pinwords.symbol")
@@ -433,6 +385,68 @@ T["real TS: PinWordSymbol on an unparsed buffer pins the declared name"] = funct
   vim.cmd("PinWordSymbol 1")
 
   MiniTest.expect.equality(require("pinwords").list()[1].raw, "myFunc")
+end
+
+T["real TS: resolves declarations and identifiers"] = function()
+  if not setup_lua_buffer() then
+    return
+  end
+  local symbol = require("pinwords.symbol")
+
+  for _, case in ipairs({
+    { pos = { 1, 15 }, expected = "myFunc" }, -- on the name itself
+    { pos = { 1, 22 }, expected = "a" }, -- parameter
+    { pos = { 2, 2 }, expected = "foo" }, -- called function
+    { pos = { 4, 0 }, expected = "method" }, -- keyword of a qualified declaration
+  }) do
+    vim.api.nvim_win_set_cursor(0, case.pos)
+    MiniTest.expect.equality(symbol.get_symbol_at_cursor(), case.expected)
+  end
+end
+
+T["real TS: literals and comments do not pick a neighboring identifier"] = function()
+  if not setup_lua_buffer() then
+    return
+  end
+  local symbol = require("pinwords.symbol")
+  -- Parse up front so this case depends only on how nodes are chosen.
+  vim.treesitter.get_parser(0):parse()
+
+  for _, case in ipairs({
+    { pos = { 2, 6 }, cword = "42" }, -- number argument next to `bar`
+    { pos = { 2, 16 }, cword = "str" }, -- string argument
+    { pos = { 2, 25 }, cword = "note" }, -- comment
+  }) do
+    vim.api.nvim_win_set_cursor(0, case.pos)
+    MiniTest.expect.equality(symbol.get_symbol_at_cursor(), nil)
+
+    -- The public command falls back to the word under the cursor.
+    require("pinwords").clear_all()
+    vim.cmd("PinWordSymbol 1")
+    MiniTest.expect.equality(require("pinwords").list()[1].raw, case.cword)
+  end
+end
+
+T["real TS: resolves C declarators and injected languages"] = function()
+  for _, lang in ipairs({ "c", "markdown", "lua" }) do
+    if not vim.treesitter.language.add(lang) then
+      MiniTest.skip(lang .. " treesitter parser not available")
+      return
+    end
+  end
+  local symbol = require("pinwords.symbol")
+
+  -- The typedef keyword resolves to the declarator, not the keyword.
+  helpers.setup_buffer({ "typedef int Foo;" })
+  vim.bo.filetype = "c"
+  MiniTest.expect.equality(symbol.get_symbol_at_cursor(), "Foo")
+
+  -- A Lua code block inside Markdown is resolved with the Lua grammar.
+  vim.cmd("enew!")
+  helpers.setup_buffer({ "# title", "```lua", "local function myFunc()", "end", "```" })
+  vim.bo.filetype = "markdown"
+  vim.api.nvim_win_set_cursor(0, { 3, 6 })
+  MiniTest.expect.equality(symbol.get_symbol_at_cursor(), "myFunc")
 end
 
 return T
