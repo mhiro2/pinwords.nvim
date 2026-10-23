@@ -427,45 +427,50 @@ T["setup applies cword highlight"] = function()
   MiniTest.expect.equality(type(hl.bg), "number")
 end
 
-T["set with opts applies per-slot options"] = function()
-  helpers.setup_buffer({ "Foo foo FOO", "bar" })
+T["set applies per-slot whole_word and case_sensitive options"] = function()
+  helpers.setup_buffer({ "foo bar" })
 
   local pinwords = require("pinwords")
-  pinwords.setup({ slots = 2 })
+  local cases = {
+    {
+      opts = { whole_word = true },
+      pattern = "\\V\\c\\<foo\\>",
+      hits = { "x foo y", "x FOO y" },
+      misses = { "foobar", "barfoo" },
+    },
+    {
+      opts = { whole_word = false },
+      pattern = "\\V\\cfoo",
+      hits = { "foobar", "barfoo", "FOO" },
+      misses = { "f oo" },
+    },
+    {
+      opts = { case_sensitive = true },
+      pattern = "\\V\\C\\<foo\\>",
+      hits = { "x foo y" },
+      misses = { "x Foo y", "x FOO y" },
+    },
+    {
+      opts = { case_sensitive = false },
+      pattern = "\\V\\c\\<foo\\>",
+      hits = { "x Foo y", "x FOO y" },
+      misses = { "x foobar y" },
+    },
+  }
 
-  pinwords.set(1, { raw = "Foo", case_sensitive = true })
-  pinwords.set(2, { raw = "Foo", case_sensitive = false })
+  for slot, case in ipairs(cases) do
+    pinwords.set(slot, vim.tbl_extend("force", { raw = "foo" }, case.opts))
 
-  local slots = pinwords.list()
-  MiniTest.expect.equality(slots[1].pattern:find("\\C"), 3)
-  MiniTest.expect.equality(slots[2].pattern:find("\\c"), 3)
-
-  local match1 = helpers.find_match("PinWord1")
-  local match2 = helpers.find_match("PinWord2")
-  MiniTest.expect.equality(match1.pattern:find("\\C"), 3)
-  MiniTest.expect.equality(match2.pattern:find("\\c"), 3)
-end
-
-T["set with whole_word option"] = function()
-  helpers.setup_buffer({ "foo foobar", "bar" })
-
-  local pinwords = require("pinwords")
-  pinwords.setup({ slots = 2 })
-
-  vim.api.nvim_win_set_cursor(0, { 1, 0 })
-  pinwords.set(1, { whole_word = true })
-
-  vim.api.nvim_win_set_cursor(0, { 1, 0 })
-  pinwords.set(2, { whole_word = false })
-
-  local slots = pinwords.list()
-  MiniTest.expect.equality(slots[1].pattern:find("\\<"), 5)
-  MiniTest.expect.equality(slots[2].pattern:find("\\<"), nil)
-
-  local match1 = helpers.find_match("PinWord1")
-  local match2 = helpers.find_match("PinWord2")
-  MiniTest.expect.equality(match1.pattern:find("\\<"), 5)
-  MiniTest.expect.equality(match2.pattern:find("\\<"), nil)
+    MiniTest.expect.equality(pinwords.list()[slot].pattern, case.pattern)
+    local match = helpers.find_match("PinWord" .. slot)
+    MiniTest.expect.equality(match.pattern, case.pattern)
+    for _, text in ipairs(case.hits) do
+      MiniTest.expect.equality(vim.fn.match(text, match.pattern) >= 0, true)
+    end
+    for _, text in ipairs(case.misses) do
+      MiniTest.expect.equality(vim.fn.match(text, match.pattern), -1)
+    end
+  end
 end
 
 T["unpin finds word by pattern when direct match fails"] = function()

@@ -119,7 +119,7 @@ T["pin word reapplied when window reopened"] = function()
   MiniTest.expect.equality(match ~= nil, true)
 end
 
-T["pin words shared globally across all buffers"] = function()
+T["pin words stay global when a window switches buffers"] = function()
   helpers.setup_buffer({ "foo bar baz" })
   local buf1 = vim.api.nvim_get_current_buf()
 
@@ -170,21 +170,6 @@ T["pin word immediately appears in all open buffers"] = function()
   end)
 
   MiniTest.expect.equality(match1 ~= nil, true)
-end
-
-T["new buffers automatically receive existing global highlights"] = function()
-  helpers.setup_buffer({ "test word" })
-
-  -- Pin a word
-  require("pinwords").set(1)
-
-  -- Create a new buffer with the same word
-  vim.cmd("enew")
-  helpers.setup_buffer({ "another test buffer" })
-
-  -- The highlight should be automatically applied
-  local match = helpers.find_match("PinWord1")
-  MiniTest.expect.equality(match ~= nil, true)
 end
 
 return T

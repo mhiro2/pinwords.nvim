@@ -79,13 +79,20 @@ end
 T["UnpinWord without slot clears word under cursor"] = function()
   helpers.setup_buffer({ "foo bar baz" })
 
-  require("pinwords").set(1)
+  local pinwords = require("pinwords")
+  pinwords.set()
+  vim.api.nvim_win_set_cursor(0, { 1, 4 })
+  pinwords.set()
   vim.api.nvim_win_set_cursor(0, { 1, 0 })
+  MiniTest.expect.equality(helpers.match_count(), 2)
 
   vim.cmd("UnpinWord")
 
-  local slots = require("pinwords").list()
+  local slots = pinwords.list()
   MiniTest.expect.equality(slots[1], nil)
+  MiniTest.expect.equality(slots[2].raw, "bar")
+  MiniTest.expect.equality(helpers.find_match("PinWord1"), nil)
+  MiniTest.expect.equality(helpers.match_count(), 1)
 end
 
 T["UnpinWord with slot clears specific slot"] = function()

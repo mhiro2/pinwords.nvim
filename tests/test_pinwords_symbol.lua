@@ -363,16 +363,6 @@ T["PinWordSymbol with slot argument pins to specific slot"] = function()
   MiniTest.expect.equality(slots[3].hl_group, "PinWord3")
 end
 
-T["set without source option uses cword as before"] = function()
-  helpers.setup_buffer({ "foo bar baz" })
-  vim.api.nvim_win_set_cursor(0, { 1, 0 })
-
-  require("pinwords").set(1)
-
-  local slots = require("pinwords").list()
-  MiniTest.expect.equality(slots[1].raw, "foo")
-end
-
 T["PinWordSymbol toggle_same unpins existing symbol"] = function()
   helpers.setup_buffer({ "function myFunc()" })
   local symbol_mod = require("pinwords.symbol")

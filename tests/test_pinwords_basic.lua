@@ -29,17 +29,6 @@ T["clear removes slot and match"] = function()
   MiniTest.expect.equality(match, nil)
 end
 
-T["unpin without slot clears word under cursor"] = function()
-  helpers.setup_buffer({ "foo bar", "baz" })
-
-  require("pinwords").set()
-  MiniTest.expect.equality(helpers.match_count() > 0, true)
-
-  vim.cmd("UnpinWord")
-  MiniTest.expect.equality(helpers.match_count(), 0)
-  MiniTest.expect.equality(next(require("pinwords").list()), nil)
-end
-
 T["clear_all removes all slots and matches"] = function()
   helpers.setup_buffer({ "foo bar baz" })
 
