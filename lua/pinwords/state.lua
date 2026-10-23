@@ -77,12 +77,6 @@ function M.clear_all()
   global_state.clear_all()
 end
 
----@param raw_or_pattern string
----@return integer|nil
-function M.find_slot_by_raw_or_pattern(raw_or_pattern)
-  return global_state.find_slot_by_raw_or_pattern(raw_or_pattern)
-end
-
 ---@param raw string
 ---@param pattern_text string
 ---@return integer|nil

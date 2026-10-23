@@ -117,54 +117,6 @@ T["clear_all resets all state"] = function()
   MiniTest.expect.equality(global.tick, 0)
 end
 
-T["find_slot_by_raw_or_pattern finds by raw"] = function()
-  helpers.setup_buffer({ "test" })
-
-  local state = require("pinwords.state")
-  state.clear_all()
-
-  state.set_slot(1, {
-    raw = "foo",
-    pattern = "\\V\\c\\<foo\\>",
-    hl_group = "PinWord1",
-  })
-
-  local slot = state.find_slot_by_raw_or_pattern("foo")
-  MiniTest.expect.equality(slot, 1)
-end
-
-T["find_slot_by_raw_or_pattern finds by pattern"] = function()
-  helpers.setup_buffer({ "test" })
-
-  local state = require("pinwords.state")
-  state.clear_all()
-
-  state.set_slot(1, {
-    raw = "foo",
-    pattern = "\\V\\c\\<foo\\>",
-    hl_group = "PinWord1",
-  })
-
-  local slot = state.find_slot_by_raw_or_pattern("\\V\\c\\<foo\\>")
-  MiniTest.expect.equality(slot, 1)
-end
-
-T["find_slot_by_raw_or_pattern returns nil when not found"] = function()
-  helpers.setup_buffer({ "test" })
-
-  local state = require("pinwords.state")
-  state.clear_all()
-
-  state.set_slot(1, {
-    raw = "foo",
-    pattern = "\\V\\c\\<foo\\>",
-    hl_group = "PinWord1",
-  })
-
-  local slot = state.find_slot_by_raw_or_pattern("bar")
-  MiniTest.expect.equality(slot, nil)
-end
-
 T["touch_slot updates order and last_used"] = function()
   helpers.setup_buffer({ "test" })
 
