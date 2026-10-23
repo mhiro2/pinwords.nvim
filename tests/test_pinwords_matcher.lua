@@ -57,35 +57,49 @@ T["apply_slot_for_window replaces existing match"] = function()
   MiniTest.expect.equality(match.pattern, "\\V\\c\\<bar\\>")
 end
 
-T["reapply_all_for_window clears and reapplies all slots"] = function()
-  helpers.setup_buffer({ "foo bar baz" })
-
-  local pinwords = require("pinwords")
-  pinwords.set(1, { raw = "foo" })
-  pinwords.set(2, { raw = "bar" })
-  pinwords.set(3, { raw = "baz" })
-
-  local win = vim.api.nvim_get_current_win()
+T["reapply_all_for_window rebuilds missing and stale slot matches"] = function()
   local state = require("pinwords.state")
-  local win_state_before = state.get_win_state(win)
-  MiniTest.expect.equality(type(win_state_before.match_ids[1]), "number")
-  MiniTest.expect.equality(type(win_state_before.match_ids[2]), "number")
-  MiniTest.expect.equality(type(win_state_before.match_ids[3]), "number")
+  local cases = {
+    -- The window missed a pin: slot 2's match is gone.
+    function(win_state)
+      vim.fn.matchdelete(win_state.match_ids[2])
+      win_state.match_ids[2] = nil
+    end,
+    -- The window missed an unpin: a slot 5 match is still around.
+    function(win_state)
+      win_state.match_ids[5] = vim.fn.matchadd("PinWord5", "stale")
+    end,
+  }
 
-  local matcher = require("pinwords.matcher")
-  matcher.reapply_all_for_window(win)
+  for _, break_window in ipairs(cases) do
+    vim.fn.clearmatches()
+    helpers.setup_buffer({ "foo bar baz" })
 
-  local win_state_after = state.get_win_state(win)
-  MiniTest.expect.equality(type(win_state_after.match_ids[1]), "number")
-  MiniTest.expect.equality(type(win_state_after.match_ids[2]), "number")
-  MiniTest.expect.equality(type(win_state_after.match_ids[3]), "number")
+    local pinwords = require("pinwords")
+    pinwords.clear_all()
+    pinwords.set(1, { raw = "foo" })
+    pinwords.set(2, { raw = "bar" })
+    pinwords.set(3, { raw = "baz" })
 
-  local match1 = helpers.find_match("PinWord1")
-  local match2 = helpers.find_match("PinWord2")
-  local match3 = helpers.find_match("PinWord3")
-  MiniTest.expect.equality(match1 ~= nil, true)
-  MiniTest.expect.equality(match2 ~= nil, true)
-  MiniTest.expect.equality(match3 ~= nil, true)
+    local win = vim.api.nvim_get_current_win()
+    local win_state = state.get_win_state(win)
+    break_window(win_state)
+    state.set_win_state(win, win_state)
+
+    require("pinwords.matcher").reapply_all_for_window(win)
+
+    local ids = state.get_win_state(win).match_ids
+    local slots = vim.tbl_keys(ids)
+    table.sort(slots)
+    MiniTest.expect.equality(slots, { 1, 2, 3 })
+    MiniTest.expect.equality(helpers.find_match("PinWord5"), nil)
+    MiniTest.expect.equality(helpers.match_count(), 3)
+    for slot, raw in ipairs({ "foo", "bar", "baz" }) do
+      local match = helpers.find_match("PinWord" .. slot)
+      MiniTest.expect.equality(match.id, ids[slot])
+      MiniTest.expect.equality(match.pattern, "\\V\\c\\<" .. raw .. "\\>")
+    end
+  end
 end
 
 T["reapply_all_for_window with invalid window does nothing"] = function()
@@ -189,37 +203,55 @@ T["apply_cword_for_window adds cword match"] = function()
   MiniTest.expect.equality(match.pattern, "\\V\\c\\<foo\\>")
 end
 
-T["apply_cword_for_window creates new match with different id"] = function()
+---@param id integer
+---@return table|nil
+local function find_match_by_id(id)
+  for _, match in ipairs(vim.fn.getmatches()) do
+    if match.id == id then
+      return match
+    end
+  end
+  return nil
+end
+
+---@return integer
+local function cword_match_count()
+  local count = 0
+  for _, match in ipairs(vim.fn.getmatches()) do
+    if match.group == "PinWordCword" then
+      count = count + 1
+    end
+  end
+  return count
+end
+
+T["apply_cword_for_window replaces the previous cword match"] = function()
   helpers.setup_buffer({ "foo bar", "baz" })
   local win = vim.api.nvim_get_current_win()
   local matcher = require("pinwords.matcher")
 
   local id1 = matcher.apply_cword_for_window(win, nil, "\\V\\c\\<foo\\>")
-  MiniTest.expect.equality(type(id1), "number")
-
-  -- Calling again with existing_id should create a new match with different id
   local id2 = matcher.apply_cword_for_window(win, id1, "\\V\\c\\<bar\\>")
+
   MiniTest.expect.equality(type(id2), "number")
   MiniTest.expect.equality(id1 ~= id2, true)
-
-  local match = helpers.find_match("PinWordCword")
-  MiniTest.expect.equality(match ~= nil, true)
+  MiniTest.expect.equality(find_match_by_id(id1), nil)
+  MiniTest.expect.equality(find_match_by_id(id2).pattern, "\\V\\c\\<bar\\>")
+  MiniTest.expect.equality(cword_match_count(), 1)
 end
 
-T["delete_match_id_for_window calls matchdelete with correct id"] = function()
+T["delete_match_id_for_window removes only the given match"] = function()
   helpers.setup_buffer({ "foo bar", "baz" })
   local win = vim.api.nvim_get_current_win()
   local matcher = require("pinwords.matcher")
 
+  local keep = vim.fn.matchadd("PinWord1", "bar")
   local id = matcher.apply_cword_for_window(win, nil, "\\V\\c\\<foo\\>")
-  MiniTest.expect.equality(type(id), "number")
 
-  local match_before = helpers.find_match("PinWordCword")
-  MiniTest.expect.equality(match_before ~= nil, true)
+  matcher.delete_match_id_for_window(win, id)
 
-  -- Verify delete_match_id_for_window can be called without error
-  local ok = pcall(matcher.delete_match_id_for_window, win, id)
-  MiniTest.expect.equality(ok, true)
+  MiniTest.expect.equality(find_match_by_id(id), nil)
+  MiniTest.expect.equality(find_match_by_id(keep) ~= nil, true)
 end
 
 T["clear_cword_for_window removes cword state and match"] = function()
@@ -245,6 +277,8 @@ T["clear_cword_for_window removes cword state and match"] = function()
   local final_state = state.get_win_state(win)
   MiniTest.expect.equality(final_state.cword.match_id, nil)
   MiniTest.expect.equality(final_state.cword.pattern, nil)
+  MiniTest.expect.equality(find_match_by_id(id), nil)
+  MiniTest.expect.equality(cword_match_count(), 0)
 end
 
 T["clear_cword_for_window with no cword state does nothing"] = function()

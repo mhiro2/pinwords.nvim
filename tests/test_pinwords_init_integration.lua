@@ -109,15 +109,22 @@ T["setup reapplies matches to all windows"] = function()
   helpers.setup_buffer({ "foo bar" })
 
   local pinwords = require("pinwords")
-  pinwords.setup({ slots = 3 })
   pinwords.set(1, { raw = "foo" })
 
-  helpers.open_vsplit()
-
-  local match_before = vim.api.nvim_win_call(0, function()
-    return helpers.find_match("PinWord1")
-  end)
-  MiniTest.expect.equality(match_before ~= nil, true)
+  -- Windows opened without autocmds never received the pin.
+  local pinned_win = vim.api.nvim_get_current_win()
+  vim.cmd("noautocmd vsplit")
+  vim.cmd("noautocmd split")
+  local wins = vim.api.nvim_list_wins()
+  MiniTest.expect.equality(#wins, 3)
+  for _, win in ipairs(wins) do
+    if win ~= pinned_win then
+      local missing = vim.api.nvim_win_call(win, function()
+        return helpers.find_match("PinWord1")
+      end)
+      MiniTest.expect.equality(missing, nil)
+    end
+  end
 
   pinwords.setup({ slots = 3 })
 
@@ -125,7 +132,8 @@ T["setup reapplies matches to all windows"] = function()
     local match = vim.api.nvim_win_call(win, function()
       return helpers.find_match("PinWord1")
     end)
-    MiniTest.expect.equality(match ~= nil, true)
+    MiniTest.expect.equality(match.pattern, "\\V\\c\\<foo\\>")
+    MiniTest.expect.equality(match.priority, 10)
   end
 end
 
@@ -292,13 +300,25 @@ T["setup merges partial config with defaults"] = function()
   MiniTest.expect.equality(pinwords.list()[2].raw, "e")
 end
 
-T["setup creates autocmd group"] = function()
+T["setup after teardown recreates autocmds and commands"] = function()
   helpers.setup_buffer({ "foo bar" })
 
   local pinwords = require("pinwords")
+  pinwords.teardown()
+  MiniTest.expect.equality(has_pinwords_autocmds(), false)
+  MiniTest.expect.equality(vim.api.nvim_get_commands({ builtin = false })["PinWord"], nil)
+
   pinwords.setup()
 
   MiniTest.expect.equality(has_pinwords_autocmds(), true)
+  vim.cmd("PinWord 1")
+  MiniTest.expect.equality(pinwords.list()[1].raw, "foo")
+
+  -- The recreated BufWinEnter/WinEnter handler reaches a window opened afterwards.
+  vim.cmd("noautocmd vsplit")
+  MiniTest.expect.equality(helpers.find_match("PinWord1"), nil)
+  vim.api.nvim_exec_autocmds("WinEnter", {})
+  MiniTest.expect.equality(helpers.find_match("PinWord1").pattern, "\\V\\c\\<foo\\>")
 end
 
 T["setup deduplicates reapply across BufWinEnter and WinEnter"] = function()
@@ -325,61 +345,51 @@ T["setup deduplicates reapply across BufWinEnter and WinEnter"] = function()
   MiniTest.expect.equality(reapply_calls, 1)
 end
 
-T["setup window-enter callback handles missing win field"] = function()
+T["setup window-enter callback falls back to the current window without win field"] = function()
   helpers.setup_buffer({ "foo bar" })
 
   local pinwords = require("pinwords")
-  local original_create_autocmd = vim.api.nvim_create_autocmd
-  local window_enter_callback
+  pinwords.set(1, { raw = "foo" })
 
-  vim.api.nvim_create_autocmd = function(event, opts)
-    local events = type(event) == "table" and event or { event }
-    for _, name in ipairs(events) do
-      if name == "WinEnter" then
-        window_enter_callback = opts.callback
-        break
-      end
-    end
-    return original_create_autocmd(event, opts)
+  local autocmds = vim.api.nvim_get_autocmds({ group = "PinWords", event = "WinEnter" })
+  MiniTest.expect.equality(#autocmds, 1)
+  local window_enter_callback = autocmds[1].callback
+
+  local state = require("pinwords.state")
+  local other_win = vim.api.nvim_get_current_win()
+  vim.cmd("noautocmd vsplit")
+  local current_win = vim.api.nvim_get_current_win()
+
+  ---@param win integer
+  local function drop_matches(win)
+    vim.api.nvim_win_call(win, vim.fn.clearmatches)
+    state.clear_win_state(win)
   end
 
-  local ok_setup, setup_err = pcall(pinwords.setup, {})
-  vim.api.nvim_create_autocmd = original_create_autocmd
-  if not ok_setup then
-    error(setup_err)
+  ---@param win integer
+  ---@return table|nil
+  local function pin_match(win)
+    return vim.api.nvim_win_call(win, function()
+      return helpers.find_match("PinWord1")
+    end)
   end
 
-  MiniTest.expect.equality(type(window_enter_callback), "function")
+  for _, args in ipairs({
+    { event = "WinEnter", buf = vim.api.nvim_get_current_buf(), match = "" },
+    { event = "WinEnter", buf = vim.api.nvim_get_current_buf() },
+  }) do
+    drop_matches(current_win)
+    drop_matches(other_win)
+    -- Let the per-window dedup guard from the previous call expire.
+    vim.wait(20, function()
+      return false
+    end)
 
-  local ok_callback, callback_err = pcall(window_enter_callback, {
-    event = "WinEnter",
-    buf = vim.api.nvim_get_current_buf(),
-    match = "",
-  })
-  if not ok_callback then
-    error(callback_err)
+    window_enter_callback(args)
+
+    MiniTest.expect.equality(pin_match(current_win).pattern, "\\V\\c\\<foo\\>")
+    MiniTest.expect.equality(pin_match(other_win), nil)
   end
-
-  local ok_no_win, no_win_err =
-    pcall(window_enter_callback, { event = "WinEnter", buf = vim.api.nvim_get_current_buf() })
-  if not ok_no_win then
-    error(no_win_err)
-  end
-end
-
-T["setup registers commands"] = function()
-  helpers.setup_buffer({ "foo bar" })
-
-  local pinwords = require("pinwords")
-  pinwords.setup()
-
-  local ok, commands = pcall(vim.api.nvim_get_commands, { builtin = false })
-  MiniTest.expect.equality(ok, true)
-  MiniTest.expect.equality(commands["PinWord"] ~= nil, true)
-  MiniTest.expect.equality(commands["UnpinWord"] ~= nil, true)
-  MiniTest.expect.equality(commands["UnpinAllWords"] ~= nil, true)
-  MiniTest.expect.equality(commands["PinWordList"] ~= nil, true)
-  MiniTest.expect.equality(commands["PinWordCwordToggle"] ~= nil, true)
 end
 
 T["setup applies highlights for all slots"] = function()

@@ -125,6 +125,52 @@ function M.with_normal_bg(bg, func)
   end
 end
 
+---Record what happens to every timer created by vim.uv.new_timer while func
+---runs. The returned records keep updating after func returns, so a timer that
+---is stopped or closed later is still observed.
+---@param func function
+---@return { delays: integer[], stopped: boolean, closed: boolean }[]
+function M.spy_timers(func)
+  local records = {}
+  local orig_new_timer = vim.uv.new_timer
+
+  vim.uv.new_timer = function()
+    local timer = orig_new_timer()
+    local record = { delays = {}, stopped = false, closed = false }
+    records[#records + 1] = record
+
+    return setmetatable({
+      start = function(_, delay, rep, cb)
+        record.delays[#record.delays + 1] = delay
+        return timer:start(delay, rep, cb)
+      end,
+      stop = function()
+        record.stopped = true
+        return timer:stop()
+      end,
+      close = function()
+        record.closed = true
+        return timer:close()
+      end,
+    }, {
+      __index = function(_, key)
+        return function(_, ...)
+          return timer[key](timer, ...)
+        end
+      end,
+    })
+  end
+
+  local ok, err = pcall(func)
+  vim.uv.new_timer = orig_new_timer
+
+  if not ok then
+    error(err)
+  end
+
+  return records
+end
+
 ---@param func function
 ---@return any
 function M.with_notify_override(func)
