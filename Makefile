@@ -1,12 +1,13 @@
-.PHONY: deps deps-mini deps-telescope deps-plenary fmt lint stylua stylua-check selene test bench
+.PHONY: deps deps-mini deps-telescope deps-plenary deps-snacks fmt lint stylua stylua-check selene test bench
 
 NVIM ?= nvim
 GIT ?= git
 MINI_PATH ?= deps/mini.nvim
 TELESCOPE_PATH ?= deps/telescope.nvim
 PLUG_PATH ?= deps/plenary.nvim
+SNACKS_PATH ?= deps/snacks.nvim
 
-deps: deps-mini deps-plenary deps-telescope
+deps: deps-mini deps-plenary deps-telescope deps-snacks
 
 deps-mini:
 	@if [ ! -d "$(MINI_PATH)" ]; then \
@@ -26,6 +27,12 @@ deps-telescope: deps-plenary
 		$(GIT) clone --depth 1 https://github.com/nvim-telescope/telescope.nvim "$(TELESCOPE_PATH)"; \
 	fi
 
+deps-snacks:
+	@if [ ! -d "$(SNACKS_PATH)" ]; then \
+		mkdir -p "$$(dirname "$(SNACKS_PATH)")"; \
+		$(GIT) clone --depth 1 https://github.com/folke/snacks.nvim "$(SNACKS_PATH)"; \
+	fi
+
 fmt: stylua
 
 lint: stylua-check selene
@@ -40,7 +47,7 @@ selene:
 	selene ./lua ./plugin ./tests ./bench
 
 test: deps
-	MINI_PATH="$(MINI_PATH)" TELESCOPE_PATH="$(TELESCOPE_PATH)" PLUG_PATH="$(PLUG_PATH)" \
+	MINI_PATH="$(MINI_PATH)" TELESCOPE_PATH="$(TELESCOPE_PATH)" PLUG_PATH="$(PLUG_PATH)" SNACKS_PATH="$(SNACKS_PATH)" \
 		$(NVIM) --headless -u tests/minimal_init.lua -c "lua require('tests.run').run()" -c "qa"
 
 bench:

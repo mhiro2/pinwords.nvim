@@ -6,7 +6,11 @@ local T = helpers.create_test_set()
 local has_telescope = pcall(require, "telescope")
 
 if not has_telescope then
-  -- Skip tests if telescope is not installed
+  -- `make test` installs Telescope, so a missing module is a broken setup that
+  -- must fail instead of silently dropping every case below.
+  T["telescope.nvim is available"] = function()
+    error("telescope.nvim could not be loaded; run `make deps`")
+  end
   return T
 end
 
