@@ -14,6 +14,7 @@ local picker_common = require("pinwords.picker")
 ---@field idx integer
 ---@field id string
 ---@field score integer
+---@field text string
 ---@field slot integer
 ---@field raw string
 ---@field pattern string
@@ -75,6 +76,9 @@ local function pinwords_picker(opts)
       idx = item.slot,
       id = tostring(item.slot),
       score = item.slot,
+      -- Snacks matches the prompt against `text`; items without it make the
+      -- matcher error as soon as the user types.
+      text = picker_common.format_item(item),
       slot = item.slot,
       raw = item.raw,
       pattern = item.pattern,

@@ -109,15 +109,22 @@ T["setup reapplies matches to all windows"] = function()
   helpers.setup_buffer({ "foo bar" })
 
   local pinwords = require("pinwords")
-  pinwords.setup({ slots = 3 })
   pinwords.set(1, { raw = "foo" })
 
-  helpers.open_vsplit()
-
-  local match_before = vim.api.nvim_win_call(0, function()
-    return helpers.find_match("PinWord1")
-  end)
-  MiniTest.expect.equality(match_before ~= nil, true)
+  -- Windows opened without autocmds never received the pin.
+  local pinned_win = vim.api.nvim_get_current_win()
+  vim.cmd("noautocmd vsplit")
+  vim.cmd("noautocmd split")
+  local wins = vim.api.nvim_list_wins()
+  MiniTest.expect.equality(#wins, 3)
+  for _, win in ipairs(wins) do
+    if win ~= pinned_win then
+      local missing = vim.api.nvim_win_call(win, function()
+        return helpers.find_match("PinWord1")
+      end)
+      MiniTest.expect.equality(missing, nil)
+    end
+  end
 
   pinwords.setup({ slots = 3 })
 
@@ -125,7 +132,8 @@ T["setup reapplies matches to all windows"] = function()
     local match = vim.api.nvim_win_call(win, function()
       return helpers.find_match("PinWord1")
     end)
-    MiniTest.expect.equality(match ~= nil, true)
+    MiniTest.expect.equality(match.pattern, "\\V\\c\\<foo\\>")
+    MiniTest.expect.equality(match.priority, 10)
   end
 end
 
@@ -182,6 +190,7 @@ T["setup with invalid config falls back to defaults"] = function()
   helpers.setup_buffer({ "foo bar" })
 
   local pinwords = require("pinwords")
+  local defaults = require("pinwords.config").default_config()
 
   helpers.with_notify_override(function(notified)
     pinwords.setup({
@@ -191,14 +200,29 @@ T["setup with invalid config falls back to defaults"] = function()
       auto_allocation = "not a table",
     })
 
-    MiniTest.expect.equality(#notified > 0, true)
-
-    local slots = pinwords.list()
-    MiniTest.expect.equality(next(slots), nil)
-
-    pinwords.set(1)
-    MiniTest.expect.equality(pinwords.list()[1].raw, "foo")
+    local messages = {}
+    for _, n in ipairs(notified) do
+      messages[#messages + 1] = n.msg
+    end
+    MiniTest.expect.equality(messages, {
+      "pinwords: slots must be a positive integer; fallback to default",
+      "pinwords: whole_word must be boolean; fallback to default",
+      "pinwords: case_sensitive must be boolean; fallback to default",
+      "pinwords: auto_allocation must be a table; fallback to default",
+    })
   end)
+
+  local cfg = pinwords.get_config()
+  MiniTest.expect.equality(cfg.slots, defaults.slots)
+  MiniTest.expect.equality(cfg.whole_word, defaults.whole_word)
+  MiniTest.expect.equality(cfg.case_sensitive, defaults.case_sensitive)
+  MiniTest.expect.equality(cfg.auto_allocation, defaults.auto_allocation)
+
+  -- The default whole_word/case_sensitive pair is what a plain pin uses.
+  pinwords.set(9)
+  MiniTest.expect.equality(pinwords.list()[9].raw, "foo")
+  MiniTest.expect.equality(pinwords.list()[9].pattern, "\\V\\c\\<foo\\>")
+  MiniTest.expect.equality(helpers.find_match("PinWord9").pattern, "\\V\\c\\<foo\\>")
 end
 
 T["setup with invalid auto_allocation falls back to defaults"] = function()
@@ -208,6 +232,7 @@ T["setup with invalid auto_allocation falls back to defaults"] = function()
 
   helpers.with_notify_override(function(notified)
     pinwords.setup({
+      slots = 2,
       auto_allocation = {
         strategy = "invalid_strategy",
         on_full = "invalid_on_full",
@@ -215,50 +240,85 @@ T["setup with invalid auto_allocation falls back to defaults"] = function()
       },
     })
 
-    MiniTest.expect.equality(#notified > 0, true)
-
-    local slots = pinwords.list()
-    MiniTest.expect.equality(next(slots), nil)
-
-    pinwords.set()
-    MiniTest.expect.equality(pinwords.list()[1].raw, "foo")
+    MiniTest.expect.equality(#notified, 3)
   end)
+
+  MiniTest.expect.equality(pinwords.get_config().auto_allocation, {
+    strategy = "first_empty",
+    on_full = "replace_oldest",
+    toggle_same = true,
+  })
+
+  -- first_empty fills slot 2 after slot 1, replace_oldest then evicts slot 1.
+  pinwords.set(nil, { raw = "a" })
+  pinwords.set(nil, { raw = "b" })
+  pinwords.set(nil, { raw = "c" })
+  MiniTest.expect.equality(pinwords.list()[1].raw, "c")
+  MiniTest.expect.equality(pinwords.list()[2].raw, "b")
+
+  -- toggle_same unpins the same word again.
+  pinwords.set(nil, { raw = "c" })
+  MiniTest.expect.equality(pinwords.list()[1], nil)
 end
 
 T["setup merges partial config with defaults"] = function()
   helpers.setup_buffer({ "foo bar" })
 
   local pinwords = require("pinwords")
+  local defaults = require("pinwords.config").default_config()
 
   pinwords.setup({
-    slots = 5,
+    slots = 3,
     auto_allocation = {
       strategy = "cycle",
     },
   })
 
+  local cfg = pinwords.get_config()
+  MiniTest.expect.equality(cfg.slots, 3)
+  MiniTest.expect.equality(cfg.auto_allocation, {
+    strategy = "cycle",
+    on_full = defaults.auto_allocation.on_full,
+    toggle_same = defaults.auto_allocation.toggle_same,
+  })
+  MiniTest.expect.equality(cfg.whole_word, defaults.whole_word)
+  MiniTest.expect.equality(cfg.flash, defaults.flash)
+
   pinwords.set(nil, { raw = "a" })
   pinwords.set(nil, { raw = "b" })
+  pinwords.clear(1)
+
+  -- cycle continues after the last used slot instead of reusing the hole in slot 1.
   pinwords.set(nil, { raw = "c" })
+  MiniTest.expect.equality(pinwords.list()[3].raw, "c")
+  MiniTest.expect.equality(pinwords.list()[1], nil)
 
-  local slots = pinwords.list()
-  MiniTest.expect.equality(slots[1].raw, "a")
-  MiniTest.expect.equality(slots[2].raw, "b")
-  MiniTest.expect.equality(slots[3].raw, "c")
-
+  -- The cycle wraps back to slot 1, then the default on_full replaces the oldest slot.
   pinwords.set(nil, { raw = "d" })
-
-  local slots2 = pinwords.list()
-  MiniTest.expect.equality(slots2[4].raw, "d")
+  MiniTest.expect.equality(pinwords.list()[1].raw, "d")
+  pinwords.set(nil, { raw = "e" })
+  MiniTest.expect.equality(pinwords.list()[2].raw, "e")
 end
 
-T["setup creates autocmd group"] = function()
+T["setup after teardown recreates autocmds and commands"] = function()
   helpers.setup_buffer({ "foo bar" })
 
   local pinwords = require("pinwords")
+  pinwords.teardown()
+  MiniTest.expect.equality(has_pinwords_autocmds(), false)
+  MiniTest.expect.equality(vim.api.nvim_get_commands({ builtin = false })["PinWord"], nil)
+
   pinwords.setup()
 
   MiniTest.expect.equality(has_pinwords_autocmds(), true)
+  vim.cmd("PinWord 1")
+  MiniTest.expect.equality(pinwords.list()[1].raw, "foo")
+
+  -- The recreated BufWinEnter/WinEnter handler reaches a window opened afterwards.
+  vim.cmd("noautocmd vsplit")
+  MiniTest.expect.equality(helpers.find_match("PinWord1"), nil)
+  vim.api.nvim_exec_autocmds("WinEnter", {})
+  MiniTest.expect.equality(helpers.find_match("PinWord1").pattern, "\\V\\c\\<foo\\>")
 end
 
 T["setup deduplicates reapply across BufWinEnter and WinEnter"] = function()
@@ -285,61 +345,51 @@ T["setup deduplicates reapply across BufWinEnter and WinEnter"] = function()
   MiniTest.expect.equality(reapply_calls, 1)
 end
 
-T["setup window-enter callback handles missing win field"] = function()
+T["setup window-enter callback falls back to the current window without win field"] = function()
   helpers.setup_buffer({ "foo bar" })
 
   local pinwords = require("pinwords")
-  local original_create_autocmd = vim.api.nvim_create_autocmd
-  local window_enter_callback
+  pinwords.set(1, { raw = "foo" })
 
-  vim.api.nvim_create_autocmd = function(event, opts)
-    local events = type(event) == "table" and event or { event }
-    for _, name in ipairs(events) do
-      if name == "WinEnter" then
-        window_enter_callback = opts.callback
-        break
-      end
-    end
-    return original_create_autocmd(event, opts)
+  local autocmds = vim.api.nvim_get_autocmds({ group = "PinWords", event = "WinEnter" })
+  MiniTest.expect.equality(#autocmds, 1)
+  local window_enter_callback = autocmds[1].callback
+
+  local state = require("pinwords.state")
+  local other_win = vim.api.nvim_get_current_win()
+  vim.cmd("noautocmd vsplit")
+  local current_win = vim.api.nvim_get_current_win()
+
+  ---@param win integer
+  local function drop_matches(win)
+    vim.api.nvim_win_call(win, vim.fn.clearmatches)
+    state.clear_win_state(win)
   end
 
-  local ok_setup, setup_err = pcall(pinwords.setup, {})
-  vim.api.nvim_create_autocmd = original_create_autocmd
-  if not ok_setup then
-    error(setup_err)
+  ---@param win integer
+  ---@return table|nil
+  local function pin_match(win)
+    return vim.api.nvim_win_call(win, function()
+      return helpers.find_match("PinWord1")
+    end)
   end
 
-  MiniTest.expect.equality(type(window_enter_callback), "function")
+  for _, args in ipairs({
+    { event = "WinEnter", buf = vim.api.nvim_get_current_buf(), match = "" },
+    { event = "WinEnter", buf = vim.api.nvim_get_current_buf() },
+  }) do
+    drop_matches(current_win)
+    drop_matches(other_win)
+    -- Let the per-window dedup guard from the previous call expire.
+    vim.wait(20, function()
+      return false
+    end)
 
-  local ok_callback, callback_err = pcall(window_enter_callback, {
-    event = "WinEnter",
-    buf = vim.api.nvim_get_current_buf(),
-    match = "",
-  })
-  if not ok_callback then
-    error(callback_err)
+    window_enter_callback(args)
+
+    MiniTest.expect.equality(pin_match(current_win).pattern, "\\V\\c\\<foo\\>")
+    MiniTest.expect.equality(pin_match(other_win), nil)
   end
-
-  local ok_no_win, no_win_err =
-    pcall(window_enter_callback, { event = "WinEnter", buf = vim.api.nvim_get_current_buf() })
-  if not ok_no_win then
-    error(no_win_err)
-  end
-end
-
-T["setup registers commands"] = function()
-  helpers.setup_buffer({ "foo bar" })
-
-  local pinwords = require("pinwords")
-  pinwords.setup()
-
-  local ok, commands = pcall(vim.api.nvim_get_commands, { builtin = false })
-  MiniTest.expect.equality(ok, true)
-  MiniTest.expect.equality(commands["PinWord"] ~= nil, true)
-  MiniTest.expect.equality(commands["UnpinWord"] ~= nil, true)
-  MiniTest.expect.equality(commands["UnpinAllWords"] ~= nil, true)
-  MiniTest.expect.equality(commands["PinWordList"] ~= nil, true)
-  MiniTest.expect.equality(commands["PinWordCwordToggle"] ~= nil, true)
 end
 
 T["setup applies highlights for all slots"] = function()
@@ -377,74 +427,50 @@ T["setup applies cword highlight"] = function()
   MiniTest.expect.equality(type(hl.bg), "number")
 end
 
-T["set with opts applies per-slot options"] = function()
-  helpers.setup_buffer({ "Foo foo FOO", "bar" })
+T["set applies per-slot whole_word and case_sensitive options"] = function()
+  helpers.setup_buffer({ "foo bar" })
 
   local pinwords = require("pinwords")
-  pinwords.setup({ slots = 2 })
+  local cases = {
+    {
+      opts = { whole_word = true },
+      pattern = "\\V\\c\\<foo\\>",
+      hits = { "x foo y", "x FOO y" },
+      misses = { "foobar", "barfoo" },
+    },
+    {
+      opts = { whole_word = false },
+      pattern = "\\V\\cfoo",
+      hits = { "foobar", "barfoo", "FOO" },
+      misses = { "f oo" },
+    },
+    {
+      opts = { case_sensitive = true },
+      pattern = "\\V\\C\\<foo\\>",
+      hits = { "x foo y" },
+      misses = { "x Foo y", "x FOO y" },
+    },
+    {
+      opts = { case_sensitive = false },
+      pattern = "\\V\\c\\<foo\\>",
+      hits = { "x Foo y", "x FOO y" },
+      misses = { "x foobar y" },
+    },
+  }
 
-  pinwords.set(1, { raw = "Foo", case_sensitive = true })
-  pinwords.set(2, { raw = "Foo", case_sensitive = false })
+  for slot, case in ipairs(cases) do
+    pinwords.set(slot, vim.tbl_extend("force", { raw = "foo" }, case.opts))
 
-  local slots = pinwords.list()
-  MiniTest.expect.equality(slots[1].pattern:find("\\C"), 3)
-  MiniTest.expect.equality(slots[2].pattern:find("\\c"), 3)
-
-  local match1 = helpers.find_match("PinWord1")
-  local match2 = helpers.find_match("PinWord2")
-  MiniTest.expect.equality(match1.pattern:find("\\C"), 3)
-  MiniTest.expect.equality(match2.pattern:find("\\c"), 3)
-end
-
-T["set with whole_word option"] = function()
-  helpers.setup_buffer({ "foo foobar", "bar" })
-
-  local pinwords = require("pinwords")
-  pinwords.setup({ slots = 2 })
-
-  vim.api.nvim_win_set_cursor(0, { 1, 0 })
-  pinwords.set(1, { whole_word = true })
-
-  vim.api.nvim_win_set_cursor(0, { 1, 0 })
-  pinwords.set(2, { whole_word = false })
-
-  local slots = pinwords.list()
-  MiniTest.expect.equality(slots[1].pattern:find("\\<"), 5)
-  MiniTest.expect.equality(slots[2].pattern:find("\\<"), nil)
-
-  local match1 = helpers.find_match("PinWord1")
-  local match2 = helpers.find_match("PinWord2")
-  MiniTest.expect.equality(match1.pattern:find("\\<"), 5)
-  MiniTest.expect.equality(match2.pattern:find("\\<"), nil)
-end
-
-T["toggle_same toggles existing word"] = function()
-  helpers.setup_buffer({ "foo bar", "baz" })
-
-  local pinwords = require("pinwords")
-  pinwords.setup({ auto_allocation = { toggle_same = true } })
-
-  pinwords.set()
-  MiniTest.expect.equality(helpers.match_count() > 0, true)
-
-  pinwords.set()
-  MiniTest.expect.equality(helpers.match_count(), 0)
-  MiniTest.expect.equality(next(pinwords.list()), nil)
-end
-
-T["toggle_same=false adds duplicate to different slot"] = function()
-  helpers.setup_buffer({ "foo bar", "baz" })
-
-  local pinwords = require("pinwords")
-  pinwords.setup({ auto_allocation = { toggle_same = false } })
-
-  pinwords.set()
-  local before = helpers.match_count()
-
-  pinwords.set()
-  local after = helpers.match_count()
-
-  MiniTest.expect.equality(after >= before, true)
+    MiniTest.expect.equality(pinwords.list()[slot].pattern, case.pattern)
+    local match = helpers.find_match("PinWord" .. slot)
+    MiniTest.expect.equality(match.pattern, case.pattern)
+    for _, text in ipairs(case.hits) do
+      MiniTest.expect.equality(vim.fn.match(text, match.pattern) >= 0, true)
+    end
+    for _, text in ipairs(case.misses) do
+      MiniTest.expect.equality(vim.fn.match(text, match.pattern), -1)
+    end
+  end
 end
 
 T["unpin finds word by pattern when direct match fails"] = function()

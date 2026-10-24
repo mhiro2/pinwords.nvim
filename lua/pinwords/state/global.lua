@@ -358,17 +358,6 @@ function M.clear_all()
   schedule_sync()
 end
 
----@param raw_or_pattern string
----@return integer|nil
-function M.find_slot_by_raw_or_pattern(raw_or_pattern)
-  for slot, entry in pairs(global_state.slots) do
-    if entry.raw == raw_or_pattern or entry.pattern == raw_or_pattern then
-      return slot
-    end
-  end
-  return nil
-end
-
 ---@param raw string
 ---@param pattern_text string
 ---@return integer|nil

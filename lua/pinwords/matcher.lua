@@ -16,23 +16,6 @@ local function for_each_valid_window(fn)
   end
 end
 
----@param buf integer
----@return integer[]
-local function wins_showing_buf(buf)
-  local ok, wins = pcall(vim.fn.win_findbuf, buf)
-  if ok and type(wins) == "table" then
-    return wins
-  end
-
-  local res = {}
-  for _, win in ipairs(vim.api.nvim_list_wins()) do
-    if vim.api.nvim_win_get_buf(win) == buf then
-      table.insert(res, win)
-    end
-  end
-  return res
-end
-
 ---@param win integer
 ---@param fn fun(): any
 ---@return any
@@ -75,16 +58,6 @@ function M.apply_slot_for_window(win, slot, entry)
 
   win_state.match_ids[slot] = id
   state.set_win_state(win, win_state)
-end
-
----@param buf integer
----@param slot integer
----@param entry PinwordsSlot
----@return nil
-function M.apply_slot_for_buffer(buf, slot, entry)
-  for _, win in ipairs(wins_showing_buf(buf)) do
-    M.apply_slot_for_window(win, slot, entry)
-  end
 end
 
 ---@param win integer
@@ -144,23 +117,6 @@ function M.reapply_all_for_window(win)
 
   for slot, entry in pairs(slots) do
     M.apply_slot_for_window(win, slot, entry)
-  end
-end
-
----@param buf integer
----@param slot integer
----@return nil
-function M.clear_slot_for_buffer(buf, slot)
-  for _, win in ipairs(wins_showing_buf(buf)) do
-    clear_slot_for_window(win, slot)
-  end
-end
-
----@param buf integer
----@return nil
-function M.clear_all_for_buffer(buf)
-  for _, win in ipairs(wins_showing_buf(buf)) do
-    clear_all_for_window(win)
   end
 end
 

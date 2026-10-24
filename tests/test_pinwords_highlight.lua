@@ -76,12 +76,13 @@ T["highlight applies user-specified hex color"] = function()
   local highlight = require("pinwords.highlight")
 
   helpers.clear_hl("PinWord1")
-  highlight.apply(1, { [1] = "#ff0000" })
+  helpers.with_normal_bg(0x000000, function()
+    highlight.apply(1, { [1] = "#ff0000" })
+  end)
 
+  -- #ff0000 blended half-way into black, not the default palette color.
   local hl = vim.api.nvim_get_hl(0, { name = "PinWord1", link = false })
-  MiniTest.expect.equality(type(hl.bg) == "number", true)
-  -- The color is blended with Normal bg, so we can't check exact value
-  -- but it should be set
+  MiniTest.expect.equality(hl.bg, 0x800000)
 
   helpers.clear_hl("PinWord1")
 end
@@ -90,10 +91,13 @@ T["highlight applies user-specified table with bg"] = function()
   local highlight = require("pinwords.highlight")
 
   helpers.clear_hl("PinWord1")
-  highlight.apply(1, { [1] = { bg = "#00ff00" } })
+  helpers.with_normal_bg(0xffffff, function()
+    highlight.apply(1, { [1] = { bg = "#00ff00" } })
+  end)
 
+  -- #00ff00 blended half-way into white.
   local hl = vim.api.nvim_get_hl(0, { name = "PinWord1", link = false })
-  MiniTest.expect.equality(type(hl.bg) == "number", true)
+  MiniTest.expect.equality(hl.bg, 0x80ff80)
 
   helpers.clear_hl("PinWord1")
 end
@@ -142,10 +146,12 @@ T["highlight applies cword color"] = function()
   local highlight = require("pinwords.highlight")
 
   helpers.clear_hl("PinWordCword")
-  highlight.apply(1, { cword = "#00ffff" })
+  helpers.with_normal_bg(0x000000, function()
+    highlight.apply(1, { cword = "#00ffff" })
+  end)
 
   local hl = vim.api.nvim_get_hl(0, { name = "PinWordCword", link = false })
-  MiniTest.expect.equality(type(hl.bg) == "number", true)
+  MiniTest.expect.equality(hl.bg, 0x008080)
 
   helpers.clear_hl("PinWordCword")
 end

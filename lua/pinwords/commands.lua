@@ -57,9 +57,13 @@ end
 ---@param opts PinwordsCommandOpts
 ---@param slot integer|nil
 local function handle_pin_word(pinwords, opts, slot)
-  -- Treat range as visual selection only when '< and '> marks match the range.
-  -- This avoids accidentally pinning stale visual marks for line-range calls like :1,3PinWord.
-  local raw = selection.resolve(opts)
+  -- Treat the range as a Visual selection only when it came from '<,'> and the
+  -- marks match it, so line-range calls like :1,3PinWord pin <cword> instead.
+  local raw, err = selection.resolve(opts)
+  if err then
+    vim.notify("pinwords: " .. err, vim.log.levels.WARN)
+    return
+  end
   if raw ~= nil then
     if raw == "" then
       vim.notify("pinwords: visual selection is empty", vim.log.levels.WARN)
@@ -225,6 +229,7 @@ end
 
 ---@param max_slots integer
 function M.setup(max_slots)
+  selection.setup()
   for _, definition in ipairs(COMMAND_DEFINITIONS) do
     vim.api.nvim_create_user_command(
       definition.name,
@@ -235,6 +240,7 @@ function M.setup(max_slots)
 end
 
 function M.teardown()
+  selection.teardown()
   for _, definition in ipairs(COMMAND_DEFINITIONS) do
     pcall(vim.api.nvim_del_user_command, definition.name)
   end

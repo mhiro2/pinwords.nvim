@@ -41,6 +41,13 @@ T["set success shows and clears flash"] = function()
   MiniTest.expect.equality(is_cleared, true)
 end
 
+---@return boolean
+local function wait_flash_cleared()
+  return vim.wait(300, function()
+    return helpers.find_match(FLASH_GROUP) == nil
+  end, 10)
+end
+
 T["clear success shows flash"] = function()
   helpers.setup_buffer({ "foo bar", "baz" })
 
@@ -48,13 +55,11 @@ T["clear success shows flash"] = function()
   setup_flash(pinwords)
 
   pinwords.set(1)
-  vim.wait(300, function()
-    return helpers.find_match(FLASH_GROUP) == nil
-  end, 10)
+  MiniTest.expect.equality(wait_flash_cleared(), true)
 
   pinwords.clear(1)
 
-  MiniTest.expect.equality(helpers.find_match(FLASH_GROUP) ~= nil, true)
+  MiniTest.expect.equality(helpers.find_match(FLASH_GROUP).pattern, "\\V\\c\\<foo\\>")
 end
 
 T["unpin success shows flash"] = function()
@@ -64,13 +69,12 @@ T["unpin success shows flash"] = function()
   setup_flash(pinwords)
 
   pinwords.set(1)
-  vim.wait(300, function()
-    return helpers.find_match(FLASH_GROUP) == nil
-  end, 10)
+  MiniTest.expect.equality(wait_flash_cleared(), true)
 
   pinwords.unpin()
 
-  MiniTest.expect.equality(helpers.find_match(FLASH_GROUP) ~= nil, true)
+  MiniTest.expect.equality(pinwords.list()[1], nil)
+  MiniTest.expect.equality(helpers.find_match(FLASH_GROUP).pattern, "\\V\\c\\<foo\\>")
 end
 
 T["set with empty word does not flash"] = function()
@@ -103,24 +107,34 @@ T["flash.enabled=false disables feedback"] = function()
   setup_flash(pinwords, { enabled = false })
 
   pinwords.set(1)
-  pinwords.clear(1)
-  pinwords.unpin()
+  MiniTest.expect.equality(pinwords.list()[1].raw, "foo")
+  MiniTest.expect.equality(helpers.find_match(FLASH_GROUP), nil)
 
+  pinwords.clear(1)
+  MiniTest.expect.equality(pinwords.list()[1], nil)
+  MiniTest.expect.equality(helpers.find_match(FLASH_GROUP), nil)
+
+  pinwords.set(1)
+  pinwords.unpin()
+  MiniTest.expect.equality(pinwords.list()[1], nil)
   MiniTest.expect.equality(helpers.find_match(FLASH_GROUP), nil)
 end
 
-T["flash timeout_ms=0 clears immediately"] = function()
+T["flash timeout_ms=0 clears on the next tick"] = function()
   helpers.setup_buffer({ "foo bar", "baz" })
 
   local pinwords = require("pinwords")
   setup_flash(pinwords, { timeout_ms = 0 })
 
-  pinwords.set(1)
+  local timers = helpers.spy_timers(function()
+    pinwords.set(1)
+  end)
 
-  local cleared = vim.wait(100, function()
-    return helpers.find_match(FLASH_GROUP) == nil
-  end, 10)
-  MiniTest.expect.equality(cleared, true)
+  MiniTest.expect.equality(#timers, 1)
+  MiniTest.expect.equality(timers[1].delays, { 0 })
+  -- The flash exists until the event loop runs the zero-delay timer.
+  MiniTest.expect.equality(helpers.find_match(FLASH_GROUP).pattern, "\\V\\c\\<foo\\>")
+  MiniTest.expect.equality(wait_flash_cleared(), true)
 end
 
 return T

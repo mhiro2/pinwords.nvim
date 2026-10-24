@@ -5,21 +5,6 @@ local T = helpers.create_test_set()
 
 local grep = require("pinwords.grep")
 
----@param module_name string
----@param value any
----@param fn fun()
-local function with_loaded_module(module_name, value, fn)
-  local previous = package.loaded[module_name]
-  package.loaded[module_name] = value
-
-  local ok, err = pcall(fn)
-  package.loaded[module_name] = previous
-
-  if not ok then
-    error(err)
-  end
-end
-
 ---@param slot integer
 ---@param raw string
 ---@param pattern string
@@ -37,25 +22,243 @@ local function slot_entry(slot, raw, pattern)
   }
 end
 
+---@param case_sensitive boolean
+---@param term string
+---@return string
+local function rg_term(case_sensitive, term)
+  return (case_sensitive and "(?-i:" or "(?i:") .. term .. ")"
+end
+
+local B = "(?-u:\\b)"
+
+---@param path string
+---@param lnum integer
+---@param col integer
+---@param text string
+---@return string
+local function rg_line(path, lnum, col, text)
+  return ("%s\0%d:%d:%s\n"):format(path, lnum, col, text)
+end
+
+---@param path string
+---@param lnum integer
+---@param col integer
+---@param text string
+---@return string
+local function git_line(path, lnum, col, text)
+  return ("%s\0%d\0%d\0%s\n"):format(path, lnum, col, text)
+end
+
+---@param path string
+---@return string
+local function from_cwd(path)
+  return vim.fs.normalize(vim.fs.joinpath(vim.fn.getcwd(), path))
+end
+
+---Replace backend discovery and process execution for the fallback. Each
+---vim.system call is recorded and answered by `respond`; quickfix writes and
+---`:copen` are recorded instead of applied.
+---@param opts { executables: table<string, boolean>, respond?: fun(argv: string[], on_exit: fun(result: table)) }
+---@param fn fun(captured: { argvs: string[][], opts: table[], qf: table[], opened: integer })
+local function with_stubbed_backends(opts, fn)
+  local captured = { argvs = {}, opts = {}, qf = {}, opened = 0 }
+  local orig = {
+    executable = vim.fn.executable,
+    system = vim.system,
+    schedule = vim.schedule,
+    setqflist = vim.fn.setqflist,
+    nvim_cmd = vim.api.nvim_cmd,
+    fs_root = vim.fs.root,
+  }
+
+  vim.fn.executable = function(bin)
+    return opts.executables[bin] and 1 or 0
+  end
+  vim.fs.root = function()
+    return "/repo"
+  end
+  vim.system = function(argv, sys_opts, on_exit)
+    captured.argvs[#captured.argvs + 1] = argv
+    captured.opts[#captured.opts + 1] = sys_opts
+    if opts.respond then
+      opts.respond(argv, on_exit)
+    end
+    return {}
+  end
+  vim.schedule = function(cb)
+    cb()
+  end
+  vim.fn.setqflist = function(_list, action, what)
+    captured.qf[#captured.qf + 1] = { action = action, what = what }
+  end
+  vim.api.nvim_cmd = function(cmd, _opts)
+    if cmd.cmd == "copen" then
+      captured.opened = captured.opened + 1
+    end
+  end
+
+  local ok, err = pcall(fn, captured)
+
+  vim.fn.executable = orig.executable
+  vim.system = orig.system
+  vim.schedule = orig.schedule
+  vim.fn.setqflist = orig.setqflist
+  vim.api.nvim_cmd = orig.nvim_cmd
+  vim.fs.root = orig.fs_root
+
+  if not ok then
+    error(err)
+  end
+end
+
+---@param stdout string
+---@return fun(argv: string[], on_exit: fun(result: table))
+local function respond_with(stdout)
+  return function(_argv, on_exit)
+    on_exit({ code = stdout == "" and 1 or 0, stdout = stdout, stderr = "" })
+  end
+end
+
+---Create a throwaway project, run fn with it as the cwd, then restore the cwd.
+---@param files table<string, string[]>
+---@param fn fun(root: string)
+local function with_project(files, fn)
+  local root = vim.fn.resolve(vim.fn.tempname())
+  for path, lines in pairs(files) do
+    local full = vim.fs.joinpath(root, path)
+    vim.fn.mkdir(vim.fs.dirname(full), "p")
+    vim.fn.writefile(lines, full)
+  end
+
+  local cwd = vim.fn.getcwd()
+  vim.cmd.cd(vim.fn.fnameescape(root))
+  local ok, err = pcall(fn, root)
+  vim.cmd.cd(vim.fn.fnameescape(cwd))
+  vim.fn.delete(root, "rf")
+
+  if not ok then
+    error(err)
+  end
+end
+
+---Restrict backend discovery to `available` while fn runs; the backends that
+---remain are executed for real.
+---@param available table<string, boolean>
+---@param fn fun()
+local function with_backends(available, fn)
+  local orig_executable = vim.fn.executable
+  vim.fn.executable = function(bin)
+    if available[bin] == nil then
+      return orig_executable(bin)
+    end
+    return available[bin] and orig_executable(bin) or 0
+  end
+  local ok, err = pcall(fn)
+  vim.fn.executable = orig_executable
+  if not ok then
+    error(err)
+  end
+end
+
+---Run a fallback grep against the real backends and return the quickfix items
+---as project-relative `path:lnum:col:text` strings, sorted, along with the
+---notifications and the backends that were started.
+---@param root string
+---@param slots table<integer, PinwordsSlot>
+---@param after_dispatch? fun()  runs right after the search is started
+---@return string[] items, table[] notified, string[] backends
+local function run_real_grep(root, slots, after_dispatch)
+  vim.fn.setqflist({}, " ", { title = "sentinel" })
+  -- List ids are unique, unlike numbers, which stop changing once the stack is full.
+  local sentinel_id = vim.fn.getqflist({ id = 0 }).id
+
+  local backends = {}
+  local orig_system = vim.system
+  vim.system = function(argv, ...)
+    backends[#backends + 1] = argv[1]
+    return orig_system(argv, ...)
+  end
+
+  local notified
+  local ok, err = pcall(helpers.with_notify_override, function(n)
+    notified = n
+    grep._fallback_grep(slots, nil)
+    if after_dispatch then
+      after_dispatch()
+    end
+    local done = vim.wait(10000, function()
+      local last = n[#n]
+      return vim.fn.getqflist({ id = 0 }).id ~= sentinel_id or (last ~= nil and not last.msg:find("scanning", 1, true))
+    end, 10)
+    MiniTest.expect.equality(done, true)
+  end)
+  vim.system = orig_system
+  -- Whatever happened, no callback of this search may touch a later case.
+  grep.teardown()
+  pcall(vim.cmd.cclose)
+  if not ok then
+    error(err)
+  end
+
+  local items = {}
+  if vim.fn.getqflist({ title = 0 }).title == "pinwords grep" then
+    for _, item in ipairs(vim.fn.getqflist()) do
+      local name = vim.fn.resolve(vim.api.nvim_buf_get_name(item.bufnr))
+      items[#items + 1] = ("%s:%d:%d:%s"):format(vim.fs.relpath(root, name) or name, item.lnum, item.col, item.text)
+    end
+  else
+    -- No results: the user's quickfix list stays current.
+    MiniTest.expect.equality(vim.fn.getqflist({ id = 0, title = 0 }), { id = sentinel_id, title = "sentinel" })
+  end
+  table.sort(items)
+  return items, notified, backends
+end
+
+---@param root string
+local function git_init(root)
+  if vim.fn.executable("git") ~= 1 then
+    error("git is required for the real backend tests")
+  end
+  local result = vim.system({ "git", "init", "-q" }, { cwd = root }):wait()
+  MiniTest.expect.equality(result.code, 0)
+end
+
+---@param raw string
+---@param opts { whole_word: boolean, case_sensitive: boolean, slot?: integer }
+---@return PinwordsSlot
+local function pinned(raw, opts)
+  local slot = opts.slot or 1
+  return {
+    raw = raw,
+    pattern = require("pinwords.pattern").build(raw, opts),
+    hl_group = "PinWord" .. slot,
+    whole_word = opts.whole_word,
+    case_sensitive = opts.case_sensitive,
+  }
+end
+
+local function require_rg()
+  if vim.fn.executable("rg") ~= 1 then
+    error("ripgrep is required for the real backend tests")
+  end
+end
+
 -- ==========================================================================
 -- build_rg_pattern
 -- ==========================================================================
 
 T["build_rg_pattern returns nil when no slots"] = function()
-  local result = grep.build_rg_pattern({}, nil)
-  MiniTest.expect.equality(result, nil)
+  MiniTest.expect.equality(grep.build_rg_pattern({}, nil), nil)
 end
 
 T["build_rg_pattern returns nil for missing slot"] = function()
   local slots = { [1] = slot_entry(1, "foo", "\\V\\Cfoo") }
-  local result = grep.build_rg_pattern(slots, 5)
-  MiniTest.expect.equality(result, nil)
+  MiniTest.expect.equality(grep.build_rg_pattern(slots, 5), nil)
 end
 
 T["build_rg_pattern returns single word for one slot"] = function()
   local slots = { [1] = slot_entry(1, "foo", "\\V\\Cfoo") }
-  local result = grep.build_rg_pattern(slots, nil)
-  MiniTest.expect.equality(result, "foo")
+  MiniTest.expect.equality(grep.build_rg_pattern(slots, nil), rg_term(true, "foo"))
 end
 
 T["build_rg_pattern returns specific slot when specified"] = function()
@@ -63,162 +266,763 @@ T["build_rg_pattern returns specific slot when specified"] = function()
     [1] = slot_entry(1, "foo", "\\V\\Cfoo"),
     [2] = slot_entry(2, "bar", "\\V\\Cbar"),
   }
-  local result = grep.build_rg_pattern(slots, 2)
-  MiniTest.expect.equality(result, "bar")
+  MiniTest.expect.equality(grep.build_rg_pattern(slots, 2), rg_term(true, "bar"))
 end
 
-T["build_rg_pattern joins multiple words with OR"] = function()
-  local slots = {
-    [1] = slot_entry(1, "foo", "\\V\\Cfoo"),
-    [2] = slot_entry(2, "bar", "\\V\\Cbar"),
-    [3] = slot_entry(3, "baz", "\\V\\Cbaz"),
-  }
-  local result = grep.build_rg_pattern(slots, nil)
-  MiniTest.expect.equality(result, "foo|bar|baz")
-end
-
-T["build_rg_pattern sorts by slot number"] = function()
+T["build_rg_pattern joins multiple words with OR in slot order"] = function()
   local slots = {
     [3] = slot_entry(3, "baz", "\\V\\Cbaz"),
     [1] = slot_entry(1, "foo", "\\V\\Cfoo"),
+    [2] = slot_entry(2, "bar", "\\V\\cbar"),
   }
-  local result = grep.build_rg_pattern(slots, nil)
-  MiniTest.expect.equality(result, "foo|baz")
+  MiniTest.expect.equality(
+    grep.build_rg_pattern(slots, nil),
+    rg_term(true, "foo") .. "|" .. rg_term(false, "bar") .. "|" .. rg_term(true, "baz")
+  )
 end
 
 T["build_rg_pattern escapes ripgrep metacharacters"] = function()
   local slots = {
     [1] = slot_entry(1, "foo.bar", "\\V\\Cfoo.bar"),
     [2] = slot_entry(2, "a+b*c", "\\V\\Ca+b*c"),
+    [3] = slot_entry(3, "fn(x)", "\\V\\Cfn(x)"),
+    [4] = slot_entry(4, "a[0]", "\\V\\Ca[0]"),
+    [5] = slot_entry(5, "a|b", "\\V\\Ca|b"),
+    [6] = slot_entry(6, "c\\d", "\\V\\Cc\\\\d"),
+    [7] = slot_entry(7, "^start", "\\V\\C^start"),
+    [8] = slot_entry(8, "end$", "\\V\\Cend$"),
   }
-  local result = grep.build_rg_pattern(slots, nil)
-  MiniTest.expect.equality(result, "foo\\.bar|a\\+b\\*c")
+  local expected = {}
+  for _, term in ipairs({ "foo\\.bar", "a\\+b\\*c", "fn\\(x\\)", "a\\[0\\]", "a\\|b", "c\\\\d", "\\^start", "end\\$" }) do
+    expected[#expected + 1] = rg_term(true, term)
+  end
+  MiniTest.expect.equality(grep.build_rg_pattern(slots, nil), table.concat(expected, "|"))
 end
 
-T["build_rg_pattern escapes parentheses and brackets"] = function()
-  local slots = {
-    [1] = slot_entry(1, "fn(x)", "\\V\\Cfn(x)"),
-    [2] = slot_entry(2, "a[0]", "\\V\\Ca[0]"),
-  }
-  local result = grep.build_rg_pattern(slots, nil)
-  MiniTest.expect.equality(result, "fn\\(x\\)|a\\[0\\]")
-end
-
-T["build_rg_pattern escapes pipe and backslash"] = function()
-  local slots = {
-    [1] = slot_entry(1, "a|b", "\\V\\Ca|b"),
-    [2] = slot_entry(2, "c\\d", "\\V\\Cc\\\\d"),
-  }
-  local result = grep.build_rg_pattern(slots, nil)
-  MiniTest.expect.equality(result, "a\\|b|c\\\\d")
-end
-
-T["build_rg_pattern escapes caret and dollar"] = function()
-  local slots = {
-    [1] = slot_entry(1, "^start", "\\V\\C^start"),
-    [2] = slot_entry(2, "end$", "\\V\\Cend$"),
-  }
-  local result = grep.build_rg_pattern(slots, nil)
-  MiniTest.expect.equality(result, "\\^start|end\\$")
-end
-
-T["build_rg_pattern preserves per-slot match semantics"] = function()
+T["build_rg_pattern makes case sensitivity explicit for every slot"] = function()
   local slots = {
     [1] = slot_entry(1, "Foo", "\\V\\CFoo"),
-    [2] = slot_entry(2, "bar", "\\V\\c\\<bar\\>"),
+    [2] = slot_entry(2, "foo", "\\V\\C\\<foo\\>"),
+    [3] = slot_entry(3, "bar", "\\V\\c\\<bar\\>"),
   }
-  local result = grep.build_rg_pattern(slots, nil)
-  MiniTest.expect.equality(result, "Foo|(?i:\\bbar\\b)")
+  MiniTest.expect.equality(
+    grep.build_rg_pattern(slots, nil),
+    rg_term(true, "Foo") .. "|" .. rg_term(true, B .. "foo" .. B) .. "|" .. rg_term(false, B .. "bar" .. B)
+  )
 end
 
-T["build_rg_pattern only adds word boundaries next to keyword characters"] = function()
+T["build_rg_pattern only adds word boundaries next to ASCII word characters"] = function()
   local slots = {
     [1] = slot_entry(1, "-foo", "\\V\\C-foo\\>"),
     [2] = slot_entry(2, "foo-", "\\V\\C\\<foo-"),
     [3] = slot_entry(3, "--", "\\V\\C--"),
+    -- Pinned where `-` was a keyword character: the saved pattern bounds both
+    -- ends, but `-` is never an ASCII word character for ripgrep.
+    [4] = slot_entry(4, "-foo-", "\\V\\C\\<-foo-\\>"),
+    -- Multibyte endpoints: Vim and ripgrep disagree on what a word is there.
+    [5] = slot_entry(5, "\228\184\128foo\228\184\128", "\\V\\C\\<\228\184\128foo\228\184\128\\>"),
+    [6] = slot_entry(6, "\195\132foo", "\\V\\C\\<\195\132foo\\>"),
+    [7] = slot_entry(7, "\240\159\152\128foo", "\\V\\C\\<\240\159\152\128foo\\>"),
   }
+  for _, entry in pairs(slots) do
+    entry.whole_word = true
+  end
+  local expected = {
+    rg_term(true, "-foo" .. B),
+    rg_term(true, B .. "foo-"),
+    rg_term(true, "--"),
+    rg_term(true, "-foo-"),
+    rg_term(true, "\228\184\128foo\228\184\128"),
+    rg_term(true, "\195\132foo" .. B),
+    rg_term(true, "\240\159\152\128foo" .. B),
+  }
+  MiniTest.expect.equality(grep.build_rg_pattern(slots, nil), table.concat(expected, "|"))
+end
+
+T["grep boundaries follow the saved pattern, not the current iskeyword"] = function()
+  -- Pattern saved without a leading boundary (pinned as `-foo`): widening
+  -- iskeyword afterwards must not add one back.
+  local slots = { [1] = slot_entry(1, "-foo", "\\V\\C-foo\\>") }
   slots[1].whole_word = true
-  slots[2].whole_word = true
-  slots[3].whole_word = true
-  local result = grep.build_rg_pattern(slots, nil)
-  MiniTest.expect.equality(result, "-foo\\b|\\bfoo-|--")
+
+  local saved_iskeyword = vim.bo.iskeyword
+  vim.bo.iskeyword = saved_iskeyword .. ",-"
+  local rg_pattern = grep.build_rg_pattern(slots, nil)
+  vim.bo.iskeyword = saved_iskeyword
+
+  MiniTest.expect.equality(rg_pattern, rg_term(true, "-foo" .. B))
+end
+
+T["real rg with --smart-case matches each slot's case exactly"] = function()
+  require_rg()
+
+  local slots = {
+    [1] = pinned("foo", { whole_word = true, case_sensitive = true, slot = 1 }),
+    [2] = pinned("Bar", { whole_word = false, case_sensitive = true, slot = 2 }),
+    [3] = pinned("baz", { whole_word = true, case_sensitive = false, slot = 3 }),
+  }
+  local lines = { "foo", "FOO", "Foo", "xfoo", "Bar", "bar", "BAZ", "baz", "bazooka" }
+
+  with_project({ ["a.txt"] = lines }, function(root)
+    -- Picker backends run ripgrep with --smart-case, which turns an all-lowercase
+    -- pattern case-insensitive unless the pattern says otherwise.
+    local result = vim
+      .system({ "rg", "--smart-case", "--no-filename", "-e", grep.build_rg_pattern(slots, nil), "a.txt" }, {
+        cwd = root,
+        text = true,
+      })
+      :wait()
+    local found = vim.split(vim.trim(result.stdout), "\n")
+    table.sort(found)
+    MiniTest.expect.equality(found, { "BAZ", "Bar", "baz", "foo" })
+  end)
 end
 
 -- ==========================================================================
--- build_vim_pattern
+-- Picker backends
 -- ==========================================================================
 
-T["build_vim_pattern returns nil when no slots"] = function()
-  local result = grep.build_vim_pattern({}, nil)
-  MiniTest.expect.equality(result, nil)
-end
+T["grep passes per-slot match semantics to the picker"] = function()
+  helpers.setup_buffer({ "foo FOO bar BAR" })
 
-T["build_vim_pattern uses very nomagic with OR alternation"] = function()
-  local slots = {
-    [1] = slot_entry(1, "foo.bar", "\\V\\Cfoo.bar"),
-    [2] = slot_entry(2, "a+b*c", "\\V\\Ca+b*c"),
+  local captured = {}
+  local fzf_stub = {
+    grep = function(opts)
+      captured.grep = opts
+    end,
+    live_grep = function(opts)
+      captured.live_grep = opts
+    end,
   }
-  local result = grep.build_vim_pattern(slots, nil)
-  MiniTest.expect.equality(result, "\\V\\(\\Cfoo.bar\\|\\Ca+b*c\\)")
+
+  local pinwords = require("pinwords")
+  helpers.with_loaded_module("fzf-lua", fzf_stub, function()
+    helpers.with_loaded_module("pinwords.fzf_lua", nil, function()
+      pinwords.setup({
+        whole_word = false,
+        case_sensitive = false,
+        telescope = { enabled = false },
+        snacks = { enabled = false },
+        fzf_lua = { enabled = true },
+      })
+      pinwords.set(1, { raw = "foo", whole_word = true, case_sensitive = true })
+      pinwords.set(2, { raw = "bar" })
+      pinwords.grep()
+      pinwords.live_grep({ slot = 1 })
+    end)
+  end)
+
+  MiniTest.expect.equality(captured.grep.search, rg_term(true, B .. "foo" .. B) .. "|" .. rg_term(false, "bar"))
+  MiniTest.expect.equality(captured.grep.no_esc, true)
+  -- The case-sensitive lowercase slot stays case-sensitive under --smart-case.
+  MiniTest.expect.equality(captured.live_grep.search, rg_term(true, B .. "foo" .. B))
 end
 
-T["build_vim_pattern keeps slash and literal pipe in words"] = function()
-  local slots = {
-    [1] = slot_entry(1, "foo/bar", "\\V\\Cfoo/bar"),
-    [2] = slot_entry(2, "a|b", "\\V\\Ca|b"),
+T["grep skips multi-line words when searchable slots remain"] = function()
+  helpers.setup_buffer({ "foo bar", "baz qux" })
+
+  local captured = {}
+  local fzf_stub = {
+    grep = function(opts)
+      captured = opts
+    end,
+    live_grep = function(_opts) end,
   }
-  local result = grep.build_vim_pattern(slots, nil)
-  MiniTest.expect.equality(result, "\\V\\(\\Cfoo/bar\\|\\Ca|b\\)")
+
+  local pinwords = require("pinwords")
+  helpers.with_loaded_module("fzf-lua", fzf_stub, function()
+    helpers.with_loaded_module("pinwords.fzf_lua", nil, function()
+      pinwords.setup({
+        whole_word = false,
+        case_sensitive = true,
+        telescope = { enabled = false },
+        snacks = { enabled = false },
+        fzf_lua = { enabled = true },
+      })
+      pinwords.set(1, { raw = "foo\nbaz", whole_word = false })
+      pinwords.set(2, { raw = "qux" })
+
+      helpers.with_notify_override(function(notified)
+        pinwords.grep()
+        MiniTest.expect.equality(captured.search, rg_term(true, "qux"))
+        MiniTest.expect.equality(notified, {
+          { msg = "pinwords: grep skipped 1 multi-line pinned word", level = vim.log.levels.WARN },
+        })
+      end)
+    end)
+  end)
 end
 
-T["build_vim_pattern applies whole-word prefixes"] = function()
+-- ==========================================================================
+-- Fallback dispatch (stubbed backends)
+-- ==========================================================================
+
+T["fallback grep prefers ripgrep and resolves results against the search cwd"] = function()
+  local slots = { [1] = slot_entry(1, "foo/bar", "\\V\\cfoo/bar") }
+
+  with_stubbed_backends({
+    executables = { rg = true, git = true },
+    respond = respond_with(rg_line("lua/pinwords/init.lua", 1, 1, "foo/bar :12:34: tail")),
+  }, function(captured)
+    grep._fallback_grep(slots, nil)
+
+    MiniTest.expect.equality(captured.argvs, {
+      { "rg", "--vimgrep", "--null", "--color=never", "--no-heading", "-e", rg_term(false, "foo/bar") },
+    })
+    MiniTest.expect.equality(captured.opts[1], { text = true, cwd = vim.fn.getcwd() })
+    MiniTest.expect.equality(captured.qf, {
+      {
+        action = " ",
+        what = {
+          title = "pinwords grep",
+          items = {
+            { filename = from_cwd("lua/pinwords/init.lua"), lnum = 1, col = 1, text = "foo/bar :12:34: tail" },
+          },
+        },
+      },
+    })
+    MiniTest.expect.equality(captured.opened, 1)
+  end)
+end
+
+T["fallback grep treats ripgrep no-match as info notification"] = function()
+  local slots = { [1] = slot_entry(1, "notfound", "\\V\\cnotfound") }
+
+  with_stubbed_backends({ executables = { rg = true }, respond = respond_with("") }, function(captured)
+    helpers.with_notify_override(function(notified)
+      grep._fallback_grep(slots, nil)
+      MiniTest.expect.equality(notified, {
+        { msg = "pinwords: grep found no matches", level = vim.log.levels.INFO },
+      })
+    end)
+    MiniTest.expect.equality(captured.opened, 0)
+  end)
+end
+
+T["fallback grep uses async git grep per slot when ripgrep is unavailable"] = function()
   local slots = {
     [1] = slot_entry(1, "foo", "\\V\\C\\<foo\\>"),
+    [2] = slot_entry(2, "bar", "\\V\\cbar"),
   }
-  local result = grep.build_vim_pattern(slots, nil)
-  MiniTest.expect.equality(result, "\\V\\C\\<foo\\>")
+  local stdout_by_term = {
+    foo = git_line("lua/b.lua", 2, 5, "has foo here"),
+    bar = git_line("lua/a.lua", 1, 1, "bar at start"),
+  }
+
+  local callbacks = {}
+  with_stubbed_backends({
+    executables = { git = true },
+    respond = function(argv, on_exit)
+      callbacks[#callbacks + 1] = function()
+        on_exit({ code = 0, stdout = stdout_by_term[argv[#argv]], stderr = "" })
+      end
+    end,
+  }, function(captured)
+    grep._fallback_grep(slots, nil)
+
+    -- Complete in reverse order; the merged list is still sorted by location.
+    for i = #callbacks, 1, -1 do
+      callbacks[i]()
+    end
+
+    local common =
+      { "git", "grep", "--no-color", "-I", "-z", "-n", "--column", "--untracked", "--exclude-standard", "-F" }
+    MiniTest.expect.equality(captured.argvs, {
+      vim.list_extend(vim.deepcopy(common), { "-w", "-e", "foo" }),
+      vim.list_extend(vim.deepcopy(common), { "-i", "-e", "bar" }),
+    })
+    MiniTest.expect.equality(captured.opts[1].cwd, vim.fn.getcwd())
+    MiniTest.expect.equality(#captured.qf, 1)
+    MiniTest.expect.equality(captured.qf[1].what.items, {
+      { filename = from_cwd("lua/a.lua"), lnum = 1, col = 1, text = "bar at start" },
+      { filename = from_cwd("lua/b.lua"), lnum = 2, col = 5, text = "has foo here" },
+    })
+    MiniTest.expect.equality(captured.opened, 1)
+  end)
 end
 
-T["build_vim_pattern preserves mixed slot semantics"] = function()
-  local slots = {
-    [1] = slot_entry(1, "Foo", "\\V\\CFoo"),
-    [2] = slot_entry(2, "bar", "\\V\\c\\<bar\\>"),
-  }
-  local result = grep.build_vim_pattern(slots, nil)
-  MiniTest.expect.equality(result, "\\V\\(\\CFoo\\|\\c\\<bar\\>\\)")
+T["fallback grep reports no matches when git grep finds nothing"] = function()
+  local slots = { [1] = slot_entry(1, "zzz", "\\V\\czzz") }
+
+  with_stubbed_backends({ executables = { git = true }, respond = respond_with("") }, function(captured)
+    helpers.with_notify_override(function(notified)
+      grep._fallback_grep(slots, nil)
+      MiniTest.expect.equality(notified, {
+        { msg = "pinwords: grep found no matches", level = vim.log.levels.INFO },
+      })
+    end)
+    MiniTest.expect.equality(captured.opened, 0)
+  end)
 end
 
-T["build_vim_pattern only adds word boundaries next to keyword characters"] = function()
-  local slots = {
-    [1] = slot_entry(1, "-foo", "\\V\\C-foo\\>"),
-  }
+T["fallback grep reads paths verbatim up to the NUL separator"] = function()
+  local slots = { [1] = slot_entry(1, "foo", "\\V\\Cfoo") }
+
+  for _, case in ipairs({
+    { executables = { rg = true }, line = rg_line },
+    { executables = { git = true }, line = git_line },
+  }) do
+    local stdout = case.line("dir/a\nb.txt", 1, 1, "foo") .. case.line("c:1:2:d.txt", 3, 7, "x:5:6:foo")
+    with_stubbed_backends({ executables = case.executables, respond = respond_with(stdout) }, function(captured)
+      grep._fallback_grep(slots, nil)
+      local items = captured.qf[1].what.items
+      table.sort(items, function(a, b)
+        return a.filename < b.filename
+      end)
+      MiniTest.expect.equality(items, {
+        { filename = from_cwd("c:1:2:d.txt"), lnum = 3, col = 7, text = "x:5:6:foo" },
+        { filename = from_cwd("dir/a\nb.txt"), lnum = 1, col = 1, text = "foo" },
+      })
+    end)
+  end
+end
+
+T["git grep fallback enforces one-sided boundaries on its results"] = function()
+  local slots = { [1] = slot_entry(1, "-foo", "\\V\\C-foo\\>") }
   slots[1].whole_word = true
-  local result = grep.build_vim_pattern(slots, nil)
-  MiniTest.expect.equality(result, "\\V\\C-foo\\>")
+
+  local stdout = git_line("lua/a.lua", 1, 3, "x -foo y")
+    .. git_line("lua/b.lua", 2, 1, "-foobar")
+    .. git_line("lua/c.lua", 3, 1, "-foobar and -foo")
+
+  with_stubbed_backends({ executables = { git = true }, respond = respond_with(stdout) }, function(captured)
+    grep._fallback_grep(slots, nil)
+
+    -- `-w` would demand a boundary on the `-` side, so it must not be passed.
+    MiniTest.expect.equality(vim.tbl_contains(captured.argvs[1], "-w"), false)
+    -- "-foobar" alone is rejected; the line that also contains a bounded "-foo"
+    -- is kept with the column moved to that occurrence.
+    MiniTest.expect.equality(captured.qf[1].what.items, {
+      { filename = from_cwd("lua/a.lua"), lnum = 1, col = 3, text = "x -foo y" },
+      { filename = from_cwd("lua/c.lua"), lnum = 3, col = 13, text = "-foobar and -foo" },
+    })
+  end)
+end
+
+T["git grep results are verified with the slot pattern even when -w was used"] = function()
+  local slots = { [1] = slot_entry(1, "foo", "\\V\\C\\<foo\\>") }
+  -- The second line could only come back from a looser backend match.
+  local stdout = git_line("lua/a.lua", 1, 1, "foo bar") .. git_line("lua/b.lua", 2, 1, "xfoo bar")
+
+  with_stubbed_backends({ executables = { git = true }, respond = respond_with(stdout) }, function(captured)
+    grep._fallback_grep(slots, nil)
+
+    MiniTest.expect.equality(vim.tbl_contains(captured.argvs[1], "-w"), true)
+    MiniTest.expect.equality(#captured.qf[1].what.items, 1)
+    MiniTest.expect.equality(captured.qf[1].what.items[1].filename, from_cwd("lua/a.lua"))
+  end)
+end
+
+T["ripgrep fallback results are verified against the slot pattern"] = function()
+  local slots = { [1] = slot_entry(1, "foo", "\\V\\C\\<foo\\>") }
+  local stdout = rg_line("lua/a.lua", 1, 3, "x foo y") .. rg_line("lua/b.lua", 2, 1, "xfoo y")
+
+  with_stubbed_backends({ executables = { rg = true }, respond = respond_with(stdout) }, function(captured)
+    grep._fallback_grep(slots, nil)
+
+    MiniTest.expect.equality(captured.argvs[1][#captured.argvs[1]], rg_term(true, B .. "foo" .. B))
+    MiniTest.expect.equality(captured.qf[1].what.items, {
+      { filename = from_cwd("lua/a.lua"), lnum = 1, col = 3, text = "x foo y" },
+    })
+  end)
+end
+
+T["verification keeps multibyte neighbours and case-folded matches, in order"] = function()
+  local slots = {
+    -- Whole-word slot whose results sit next to multibyte punctuation.
+    [1] = slot_entry(1, "foo", "\\V\\C\\<foo\\>"),
+    -- Case-insensitive slot with a non-ASCII letter.
+    [2] = slot_entry(2, "\195\132", "\\V\\c\195\132"),
+  }
+  local stdout = rg_line("lua/z.lua", 5, 2, "\227\128\140foo\227\128\141")
+    .. rg_line("lua/a.lua", 1, 1, "\195\164 lower")
+    .. rg_line("lua/b.lua", 2, 1, "xfoo")
+
+  with_stubbed_backends({ executables = { rg = true }, respond = respond_with(stdout) }, function(captured)
+    grep._fallback_grep(slots, nil)
+
+    local items = captured.qf[1].what.items
+    MiniTest.expect.equality(#items, 2)
+    -- ripgrep's output order is preserved rather than reordered per slot.
+    MiniTest.expect.equality(items[1].filename, from_cwd("lua/z.lua"))
+    MiniTest.expect.equality(items[2].filename, from_cwd("lua/a.lua"))
+  end)
+end
+
+T["verification keeps every match on a line at its own column"] = function()
+  local slots = { [1] = slot_entry(1, "foo", "\\V\\C\\<foo\\>") }
+  -- rg --vimgrep reports one result per match, so both columns must survive.
+  local stdout = rg_line("lua/a.lua", 1, 1, "foo and foo") .. rg_line("lua/a.lua", 1, 9, "foo and foo")
+
+  with_stubbed_backends({ executables = { rg = true }, respond = respond_with(stdout) }, function(captured)
+    grep._fallback_grep(slots, nil)
+
+    local items = captured.qf[1].what.items
+    MiniTest.expect.equality({ #items, items[1].col, items[2].col }, { 2, 1, 9 })
+  end)
+end
+
+T["grep warns once about multi-line pins when falling back"] = function()
+  helpers.setup_buffer({ "foo bar", "baz qux" })
+
+  local pinwords = require("pinwords")
+  pinwords.setup({
+    telescope = { enabled = false },
+    snacks = { enabled = false },
+    fzf_lua = { enabled = false },
+  })
+  pinwords.set(1, { raw = "foo", whole_word = false })
+  pinwords.set(2, { raw = "foo\nbaz", whole_word = false })
+
+  with_stubbed_backends({ executables = { rg = true }, respond = respond_with("") }, function()
+    helpers.with_notify_override(function(notified)
+      pinwords.grep()
+      MiniTest.expect.equality(notified, {
+        { msg = "pinwords: grep skipped 1 multi-line pinned word", level = vim.log.levels.WARN },
+        { msg = "pinwords: grep found no matches", level = vim.log.levels.INFO },
+      })
+    end)
+  end)
+end
+
+T["fallback grep passes the pattern after -e so leading dashes are safe"] = function()
+  local slots = { [1] = slot_entry(1, "-foo", "\\V\\C-foo") }
+
+  with_stubbed_backends({ executables = { rg = true }, respond = respond_with("") }, function(captured)
+    helpers.with_notify_override(function()
+      grep._fallback_grep(slots, nil)
+    end)
+
+    local argv = captured.argvs[1]
+    MiniTest.expect.equality({ argv[#argv - 1], argv[#argv] }, { "-e", rg_term(true, "-foo") })
+  end)
+end
+
+T["fallback grep drops results from superseded and torn-down runs"] = function()
+  local slots = { [1] = slot_entry(1, "foo", "\\V\\Cfoo") }
+
+  local pending = {}
+  local orig = { executable = vim.fn.executable, system = vim.system, schedule = vim.schedule, cmd = vim.api.nvim_cmd }
+  local opened = 0
+  vim.fn.executable = function(bin)
+    return bin == "rg" and 1 or 0
+  end
+  vim.system = function(_argv, _opts, on_exit)
+    pending[#pending + 1] = on_exit
+    return {}
+  end
+  vim.schedule = function(cb)
+    cb()
+  end
+  vim.api.nvim_cmd = function(cmd, _opts)
+    if cmd.cmd == "copen" then
+      opened = opened + 1
+    end
+  end
+
+  local ok, err = pcall(function()
+    -- A list the stale callbacks must leave alone.
+    vim.fn.setqflist(
+      {},
+      " ",
+      { title = "sentinel", items = { { filename = "keep.txt", lnum = 7, col = 1, text = "keep" } } }
+    )
+
+    helpers.with_notify_override(function(notified)
+      grep._fallback_grep(slots, nil)
+      grep._fallback_grep(slots, nil)
+
+      -- The superseded first run completes after the newest one; only the
+      -- newest one may write quickfix.
+      pending[2]({ code = 0, stdout = rg_line("lua/a.lua", 1, 1, "foo"), stderr = "" })
+      local newest = vim.fn.getqflist({ title = 0, items = 0 })
+      pending[1]({ code = 0, stdout = rg_line("lua/b.lua", 1, 1, "foo"), stderr = "" })
+      MiniTest.expect.equality(vim.fn.getqflist({ title = 0, items = 0 }), newest)
+      MiniTest.expect.equality(newest.title, "pinwords grep")
+      MiniTest.expect.equality(#newest.items, 1)
+      MiniTest.expect.equality(vim.api.nvim_buf_get_name(newest.items[1].bufnr), from_cwd("lua/a.lua"))
+
+      -- After teardown, even the newest in-flight run stops touching quickfix.
+      vim.fn.setqflist({}, " ", { title = "after teardown" })
+      grep._fallback_grep(slots, nil)
+      grep.teardown()
+      pending[3]({ code = 0, stdout = rg_line("lua/c.lua", 1, 1, "foo"), stderr = "" })
+      MiniTest.expect.equality(vim.fn.getqflist({ title = 0 }).title, "after teardown")
+
+      MiniTest.expect.equality(notified, {})
+    end)
+  end)
+
+  vim.fn.executable = orig.executable
+  vim.system = orig.system
+  vim.schedule = orig.schedule
+  vim.api.nvim_cmd = orig.cmd
+  if not ok then
+    error(err)
+  end
+
+  MiniTest.expect.equality(opened, 1)
+end
+
+T["a later picker-backed grep invalidates an in-flight fallback run"] = function()
+  helpers.setup_buffer({ "foo bar" })
+
+  local slots = { [1] = slot_entry(1, "foo", "\\V\\Cfoo") }
+  local fzf_calls = 0
+  local fzf_stub = {
+    grep = function(_opts)
+      fzf_calls = fzf_calls + 1
+    end,
+    live_grep = function(_opts) end,
+  }
+
+  local pending
+  local orig = { executable = vim.fn.executable, system = vim.system, schedule = vim.schedule, cmd = vim.api.nvim_cmd }
+  local opened = 0
+  vim.fn.executable = function(bin)
+    return bin == "rg" and 1 or 0
+  end
+  vim.system = function(_argv, _opts, on_exit)
+    pending = on_exit
+    return {}
+  end
+  vim.schedule = function(cb)
+    cb()
+  end
+  vim.api.nvim_cmd = function(cmd, _opts)
+    if cmd.cmd == "copen" then
+      opened = opened + 1
+    end
+  end
+
+  local ok, err = pcall(function()
+    vim.fn.setqflist({}, " ", { title = "sentinel" })
+    local pinwords = require("pinwords")
+    helpers.with_loaded_module("fzf-lua", fzf_stub, function()
+      helpers.with_loaded_module("pinwords.fzf_lua", nil, function()
+        grep._fallback_grep(slots, nil)
+
+        -- The next search is served by a picker, so it must still supersede the
+        -- fallback that is still running.
+        pinwords.setup({
+          telescope = { enabled = false },
+          snacks = { enabled = false },
+          fzf_lua = { enabled = true },
+        })
+        pinwords.set(1, { raw = "foo" })
+        helpers.with_notify_override(function(notified)
+          pinwords.grep()
+          pending({ code = 0, stdout = rg_line("lua/a.lua", 1, 1, "foo"), stderr = "" })
+          MiniTest.expect.equality(notified, {})
+        end)
+      end)
+    end)
+  end)
+
+  vim.fn.executable = orig.executable
+  vim.system = orig.system
+  vim.schedule = orig.schedule
+  vim.api.nvim_cmd = orig.cmd
+  if not ok then
+    error(err)
+  end
+
+  MiniTest.expect.equality(fzf_calls, 1)
+  MiniTest.expect.equality(opened, 0)
+  MiniTest.expect.equality(vim.fn.getqflist({ title = 0 }).title, "sentinel")
 end
 
 -- ==========================================================================
--- Command registration
+-- Fallback against real backends
 -- ==========================================================================
 
-T["PinWordGrep command is registered"] = function()
-  helpers.setup_buffer({ "foo bar baz" })
-  -- Read the description via the API rather than parsing `:command` output,
-  -- whose column wrapping/truncation varies across Neovim versions. Newer
-  -- Neovim exposes the description in `desc`; older Neovim put it in
-  -- `definition`, so check both.
-  local cmd = vim.api.nvim_get_commands({ builtin = false }).PinWordGrep
-  MiniTest.expect.equality(cmd ~= nil, true)
-  local description = (cmd.desc or "") .. (cmd.definition or "")
-  MiniTest.expect.equality(description:find("Grep pinned words across project.", 1, true) ~= nil, true)
+local PROJECT = {
+  ["a.txt"] = { "foo :12:34:tail", "Foo and foo", "xfoo", "bar BAR" },
+  ["日本 語.txt"] = { "foo here" },
+  ["sub/c.txt"] = { "nothing", "foo/bar" },
+}
+
+T["real backends agree on files, positions, and per-slot case"] = function()
+  require_rg()
+
+  local slots = {
+    [1] = pinned("foo", { whole_word = true, case_sensitive = true, slot = 1 }),
+    [2] = pinned("BAR", { whole_word = true, case_sensitive = false, slot = 2 }),
+  }
+  local expected = {
+    "a.txt:1:1:foo :12:34:tail",
+    "a.txt:2:9:Foo and foo",
+    "a.txt:4:1:bar BAR",
+    "a.txt:4:5:bar BAR",
+    "sub/c.txt:2:1:foo/bar",
+    "sub/c.txt:2:5:foo/bar",
+    "日本 語.txt:1:1:foo here",
+  }
+
+  for _, case in ipairs({
+    { available = { rg = true }, backends = { "rg" } },
+    { available = { rg = false, git = true }, backends = { "git", "git" } },
+    { available = { rg = false, git = false }, backends = {} },
+  }) do
+    with_project(PROJECT, function(root)
+      if case.available.git then
+        git_init(root)
+      end
+      with_backends(case.available, function()
+        local items, _, backends = run_real_grep(root, slots)
+        MiniTest.expect.equality(backends, case.backends)
+        MiniTest.expect.equality(items, expected)
+      end)
+    end)
+  end
 end
 
-T["PinWordLiveGrep command is registered"] = function()
-  helpers.setup_buffer({ "foo bar baz" })
-  local cmd = vim.api.nvim_get_commands({ builtin = false }).PinWordLiveGrep
-  MiniTest.expect.equality(cmd ~= nil, true)
-  local description = (cmd.desc or "") .. (cmd.definition or "")
-  MiniTest.expect.equality(description:find("Live grep pinned words across project.", 1, true) ~= nil, true)
+T["real backends keep results tied to the directory the search ran in"] = function()
+  require_rg()
+
+  local slots = { [1] = pinned("foo", { whole_word = true, case_sensitive = true }) }
+  local elsewhere = vim.fn.resolve(vim.fn.tempname())
+  vim.fn.mkdir(elsewhere, "p")
+
+  for _, case in ipairs({
+    { available = { rg = true }, backend = "rg" },
+    { available = { rg = false, git = true }, backend = "git" },
+  }) do
+    with_project({ ["a.txt"] = { "foo" } }, function(root)
+      if case.available.git then
+        git_init(root)
+      end
+      with_backends(case.available, function()
+        local items, _, backends = run_real_grep(root, slots, function()
+          -- Change directory before the asynchronous results arrive.
+          vim.cmd.cd(vim.fn.fnameescape(elsewhere))
+        end)
+        MiniTest.expect.equality(backends, { case.backend })
+        MiniTest.expect.equality(items, { "a.txt:1:1:foo" })
+      end)
+    end)
+  end
+  vim.fn.delete(elsewhere, "rf")
+end
+
+T["vimgrep fallback restores wildignore and reports no match"] = function()
+  local slots = { [1] = pinned("needle", { whole_word = true, case_sensitive = false }) }
+
+  with_project({ ["a.txt"] = { "haystack" } }, function(root)
+    local saved_wildignore = vim.o.wildignore
+    vim.o.wildignore = "*.bak"
+
+    local ok, err = pcall(function()
+      with_backends({ rg = false, git = false }, function()
+        local items, notified = run_real_grep(root, slots)
+        MiniTest.expect.equality(items, {})
+        MiniTest.expect.equality(notified, {
+          {
+            msg = "pinwords: ripgrep not available; scanning project files (this may take a moment)",
+            level = vim.log.levels.INFO,
+          },
+          { msg = "pinwords: grep found no matches", level = vim.log.levels.INFO },
+        })
+      end)
+      MiniTest.expect.equality(vim.o.wildignore, "*.bak")
+    end)
+    vim.o.wildignore = saved_wildignore
+    if not ok then
+      error(err)
+    end
+  end)
+end
+
+T["vimgrep fallback skips ignored directories"] = function()
+  local slots = { [1] = pinned("foo", { whole_word = true, case_sensitive = false }) }
+  local files = { ["a.txt"] = { "foo" } }
+  for _, dir in ipairs({ ".git", "node_modules", "build" }) do
+    files[dir .. "/x.txt"] = { "foo" }
+  end
+
+  with_project(files, function(root)
+    with_backends({ rg = false, git = false }, function()
+      MiniTest.expect.equality(run_real_grep(root, slots), { "a.txt:1:1:foo" })
+    end)
+  end)
+end
+
+T["grep matches what the highlight matches next to multibyte and symbol neighbours"] = function()
+  require_rg()
+
+  local slots = { [1] = pinned("foo", { whole_word = true, case_sensitive = false }) }
+  local lines = {
+    "\228\184\128foo", -- CJK before
+    "foo\228\184\128", -- CJK after
+    "\195\169foo", -- Latin letter before
+    "\240\159\152\128foo", -- emoji before
+    "foo\204\129", -- combining accent after
+    "x-foo",
+    "xfoo",
+    "foo_bar",
+  }
+
+  -- What the highlight pattern matches in a buffer with the default iskeyword.
+  local highlighted = {}
+  for lnum, line in ipairs(lines) do
+    if vim.fn.match(line, slots[1].pattern) >= 0 then
+      highlighted[#highlighted + 1] = lnum
+    end
+  end
+
+  with_project({ ["a.txt"] = lines }, function(root)
+    with_backends({ rg = true }, function()
+      local found = {}
+      for _, item in ipairs(run_real_grep(root, slots)) do
+        found[#found + 1] = tonumber(item:match("^a%.txt:(%d+):"))
+      end
+      table.sort(found)
+      MiniTest.expect.equality(found, highlighted)
+    end)
+
+    -- The picker pattern has no verification step, so it must not miss any of them.
+    local result = vim
+      .system({ "rg", "--smart-case", "-n", "--no-filename", "-e", grep.build_rg_pattern(slots, nil), "a.txt" }, {
+        cwd = root,
+        text = true,
+      })
+      :wait()
+    for _, lnum in ipairs(highlighted) do
+      MiniTest.expect.equality(
+        result.stdout:find("^" .. lnum .. ":") ~= nil or result.stdout:find("\n" .. lnum .. ":") ~= nil,
+        true
+      )
+    end
+  end)
+end
+
+T["grep, highlight, and jump agree for a slot pinned under another iskeyword"] = function()
+  require_rg()
+
+  -- Pinned where `-` was a keyword character, so the saved pattern needs a
+  -- keyword `-` at the start of the match.
+  helpers.setup_buffer({ "x -foo y", "x-foo" })
+  vim.bo.iskeyword = vim.bo.iskeyword .. ",-"
+  vim.api.nvim_win_set_cursor(0, { 1, 2 })
+  local pinwords = require("pinwords")
+  pinwords.set(1)
+  local slot = pinwords.list()[1]
+  MiniTest.expect.equality(slot.pattern, "\\V\\c\\<-foo\\>")
+
+  -- In a buffer with the default iskeyword the highlight and jump find nothing.
+  vim.cmd("enew!")
+  helpers.setup_buffer({ "x -foo y", "x-foo" })
+  MiniTest.expect.equality(vim.fn.searchpos(slot.pattern, "nw"), { 0, 0 })
+  MiniTest.expect.equality(pinwords.jump_next(), false)
+
+  -- ...and so does grep over the same text.
+  with_project({ ["a.txt"] = { "x -foo y", "x-foo" } }, function(root)
+    with_backends({ rg = true }, function()
+      local items, notified = run_real_grep(root, { [1] = slot })
+      MiniTest.expect.equality(items, {})
+      MiniTest.expect.equality(notified[#notified].msg, "pinwords: grep found no matches")
+    end)
+  end)
 end
 
 -- ==========================================================================
@@ -260,1209 +1064,6 @@ T["grep rejects multi-line-only pins"] = function()
     MiniTest.expect.equality(notified[1].msg:find("supports only single-line pinned words", 1, true) ~= nil, true)
     MiniTest.expect.equality(notified[1].level, vim.log.levels.WARN)
   end)
-end
-
-T["grep with invalid slot from command shows error"] = function()
-  helpers.setup_buffer({ "foo bar baz" })
-
-  helpers.with_notify_override(function(notified)
-    vim.cmd("PinWordGrep 0")
-    MiniTest.expect.equality(#notified > 0, true)
-  end)
-end
-
-T["PinWordLiveGrep with invalid slot shows error"] = function()
-  helpers.setup_buffer({ "foo bar baz" })
-
-  helpers.with_notify_override(function(notified)
-    vim.cmd("PinWordLiveGrep 0")
-    MiniTest.expect.equality(#notified > 0, true)
-  end)
-end
-
--- ==========================================================================
--- Backend integration
--- ==========================================================================
-
-T["grep preserves per-slot match semantics in ripgrep pattern"] = function()
-  helpers.setup_buffer({ "foo FOO bar BAR" })
-
-  local captured = {}
-  local fzf_stub = {
-    grep = function(opts)
-      captured = opts
-    end,
-    live_grep = function(_opts) end,
-  }
-
-  local pinwords = require("pinwords")
-  with_loaded_module("fzf-lua", fzf_stub, function()
-    with_loaded_module("pinwords.fzf_lua", nil, function()
-      pinwords.setup({
-        whole_word = false,
-        case_sensitive = true,
-        telescope = { enabled = false },
-        snacks = { enabled = false },
-        fzf_lua = { enabled = true },
-      })
-      pinwords.set(1, { raw = "Foo" })
-      pinwords.set(2, { raw = "bar", whole_word = true, case_sensitive = false })
-      pinwords.grep()
-    end)
-  end)
-
-  MiniTest.expect.equality(captured.search, "Foo|(?i:\\bbar\\b)")
-end
-
-T["live_grep uses selected slot semantics"] = function()
-  helpers.setup_buffer({ "foo FOO bar BAR" })
-
-  local captured = {}
-  local fzf_stub = {
-    grep = function(_opts) end,
-    live_grep = function(opts)
-      captured = opts
-    end,
-  }
-
-  local pinwords = require("pinwords")
-  with_loaded_module("fzf-lua", fzf_stub, function()
-    with_loaded_module("pinwords.fzf_lua", nil, function()
-      pinwords.setup({
-        whole_word = false,
-        case_sensitive = false,
-        telescope = { enabled = false },
-        snacks = { enabled = false },
-        fzf_lua = { enabled = true },
-      })
-      pinwords.set(1, { raw = "foo", whole_word = true, case_sensitive = true })
-      pinwords.set(2, { raw = "bar", whole_word = false, case_sensitive = false })
-      pinwords.live_grep({ slot = 1 })
-    end)
-  end)
-
-  MiniTest.expect.equality(captured.search, "\\bfoo\\b")
-end
-
-T["grep skips multi-line words when searchable slots remain"] = function()
-  helpers.setup_buffer({ "foo bar", "baz qux" })
-
-  local captured = {}
-  local fzf_stub = {
-    grep = function(opts)
-      captured = opts
-    end,
-    live_grep = function(_opts) end,
-  }
-
-  local pinwords = require("pinwords")
-  with_loaded_module("fzf-lua", fzf_stub, function()
-    with_loaded_module("pinwords.fzf_lua", nil, function()
-      pinwords.setup({
-        whole_word = false,
-        case_sensitive = true,
-        telescope = { enabled = false },
-        snacks = { enabled = false },
-        fzf_lua = { enabled = true },
-      })
-      pinwords.set(1, { raw = "foo\nbaz", whole_word = false })
-      pinwords.set(2, { raw = "qux" })
-
-      helpers.with_notify_override(function(notified)
-        pinwords.grep()
-        MiniTest.expect.equality(captured.search, "qux")
-        MiniTest.expect.equality(#notified > 0, true)
-        MiniTest.expect.equality(notified[1].msg:find("skipped 1 multi-line pinned word", 1, true) ~= nil, true)
-      end)
-    end)
-  end)
-end
-
--- ==========================================================================
--- Fallback integration
--- ==========================================================================
-
-T["fallback grep prefers ripgrep quickfix and preserves slot semantics"] = function()
-  local slots = {
-    [1] = slot_entry(1, "foo/bar", "\\V\\cfoo/bar"),
-  }
-
-  local captured = {}
-  local orig_executable = vim.fn.executable
-  local orig_system = vim.system
-  local orig_setqflist = vim.fn.setqflist
-  local orig_nvim_cmd = vim.api.nvim_cmd
-  local orig_schedule = vim.schedule
-
-  vim.fn.executable = function(bin)
-    MiniTest.expect.equality(bin, "rg")
-    return 1
-  end
-  vim.system = function(argv, opts, on_exit)
-    captured.argv = argv
-    captured.opts = opts
-    captured.on_exit_kind = type(on_exit)
-    if on_exit then
-      on_exit({
-        code = 0,
-        stdout = "lua/pinwords/init.lua:1:1:matched line\n",
-        stderr = "",
-      })
-    end
-    return {}
-  end
-  vim.fn.setqflist = function(_list, action, what)
-    captured.action = action
-    captured.what = what
-  end
-  vim.api.nvim_cmd = function(cmd, opts)
-    captured.command = cmd
-    captured.command_opts = opts
-  end
-  vim.schedule = function(fn)
-    fn()
-  end
-
-  local ok, err = pcall(function()
-    grep._fallback_grep(slots, nil)
-  end)
-
-  vim.fn.executable = orig_executable
-  vim.system = orig_system
-  vim.fn.setqflist = orig_setqflist
-  vim.api.nvim_cmd = orig_nvim_cmd
-  vim.schedule = orig_schedule
-
-  MiniTest.expect.equality(ok, true)
-  MiniTest.expect.equality(err, nil)
-  MiniTest.expect.equality(captured.argv, {
-    "rg",
-    "--vimgrep",
-    "--color=never",
-    "--no-heading",
-    "-e",
-    "(?i:foo/bar)",
-  })
-  MiniTest.expect.equality(captured.opts.text, true)
-  MiniTest.expect.equality(captured.on_exit_kind, "function")
-  MiniTest.expect.equality(captured.action, " ")
-  MiniTest.expect.equality(captured.what.title, "pinwords grep")
-  MiniTest.expect.equality(captured.what.items[1].filename, "lua/pinwords/init.lua")
-  MiniTest.expect.equality(captured.what.items[1].lnum, 1)
-  MiniTest.expect.equality(captured.what.items[1].col, 1)
-  MiniTest.expect.equality(captured.what.items[1].text, "matched line")
-  MiniTest.expect.equality(captured.command, { cmd = "copen" })
-  MiniTest.expect.equality(captured.command_opts, {})
-end
-
-T["fallback grep falls back to vimgrep when ripgrep is unavailable"] = function()
-  local slots = {
-    [1] = slot_entry(1, "foo/bar", "\\V\\cfoo/bar"),
-  }
-
-  local captured = {}
-  local orig_executable = vim.fn.executable
-  local orig_vimgrep = vim.fn.vimgrep
-  local orig_getqflist = vim.fn.getqflist
-  local orig_nvim_cmd = vim.api.nvim_cmd
-  local saved_wildignore = vim.o.wildignore
-  vim.o.wildignore = "*.bak"
-
-  vim.fn.executable = function(bin)
-    captured.checked = captured.checked or {}
-    captured.checked[bin] = true
-    return 0
-  end
-  vim.fn.vimgrep = function(pattern, files, flags)
-    captured.pattern = pattern
-    captured.files = files
-    captured.flags = flags
-    captured.wildignore_during_call = vim.o.wildignore
-    return 0
-  end
-  vim.fn.getqflist = function(_opts)
-    return { size = 1 }
-  end
-  vim.api.nvim_cmd = function(cmd, opts)
-    captured.command = cmd
-    captured.command_opts = opts
-  end
-
-  local ok, err
-  helpers.with_notify_override(function(notified)
-    ok, err = pcall(function()
-      grep._fallback_grep(slots, nil)
-    end)
-    captured.notified = notified
-  end)
-
-  vim.fn.executable = orig_executable
-  vim.fn.vimgrep = orig_vimgrep
-  vim.fn.getqflist = orig_getqflist
-  vim.api.nvim_cmd = orig_nvim_cmd
-  local wildignore_after = vim.o.wildignore
-  vim.o.wildignore = saved_wildignore
-
-  MiniTest.expect.equality(ok, true)
-  MiniTest.expect.equality(err, nil)
-  -- Both ripgrep and git are probed before falling back to vimgrep.
-  MiniTest.expect.equality(captured.checked.rg, true)
-  MiniTest.expect.equality(captured.checked.git, true)
-  MiniTest.expect.equality(captured.pattern, "\\V\\cfoo/bar")
-  MiniTest.expect.equality(captured.files, "**/*")
-  MiniTest.expect.equality(captured.flags, "gj")
-  MiniTest.expect.equality(captured.command, { cmd = "copen" })
-  MiniTest.expect.equality(captured.command_opts, {})
-
-  -- wildignore is extended during the call and restored afterwards.
-  MiniTest.expect.equality(captured.wildignore_during_call:find("**/node_modules/**", 1, true) ~= nil, true)
-  MiniTest.expect.equality(captured.wildignore_during_call:find("**/.git/**", 1, true) ~= nil, true)
-  MiniTest.expect.equality(captured.wildignore_during_call:find("*.bak", 1, true) ~= nil, true)
-  MiniTest.expect.equality(wildignore_after, "*.bak")
-
-  -- The user is notified that the synchronous fallback is about to run.
-  local notified = captured.notified or {}
-  local saw_scan_notice = false
-  for _, entry in ipairs(notified) do
-    if entry.msg:find("ripgrep not available", 1, true) then
-      saw_scan_notice = true
-      break
-    end
-  end
-  MiniTest.expect.equality(saw_scan_notice, true)
-end
-
-T["fallback grep restores wildignore even when vimgrep raises"] = function()
-  local slots = {
-    [1] = slot_entry(1, "needle", "\\V\\cneedle"),
-  }
-
-  local orig_executable = vim.fn.executable
-  local orig_vimgrep = vim.fn.vimgrep
-  local saved_wildignore = vim.o.wildignore
-  vim.o.wildignore = "*.tmp"
-
-  vim.fn.executable = function()
-    return 0
-  end
-  vim.fn.vimgrep = function()
-    error("E480: No match: needle")
-  end
-
-  helpers.with_notify_override(function() end)
-
-  local ok = pcall(function()
-    helpers.with_notify_override(function()
-      grep._fallback_grep(slots, nil)
-    end)
-  end)
-
-  local wildignore_after = vim.o.wildignore
-
-  vim.fn.executable = orig_executable
-  vim.fn.vimgrep = orig_vimgrep
-  vim.o.wildignore = saved_wildignore
-
-  MiniTest.expect.equality(ok, true)
-  MiniTest.expect.equality(wildignore_after, "*.tmp")
-end
-
-T["fallback grep treats ripgrep no-match as info notification"] = function()
-  local slots = {
-    [1] = slot_entry(1, "notfound", "\\V\\cnotfound"),
-  }
-
-  local orig_executable = vim.fn.executable
-  local orig_system = vim.system
-  local orig_schedule = vim.schedule
-  vim.fn.executable = function()
-    return 1
-  end
-  vim.system = function(_argv, _opts, on_exit)
-    if on_exit then
-      on_exit({ code = 1, stdout = "", stderr = "" })
-    end
-    return {}
-  end
-  vim.schedule = function(fn)
-    fn()
-  end
-
-  local ok, err = pcall(function()
-    helpers.with_notify_override(function(notified)
-      grep._fallback_grep(slots, nil)
-      MiniTest.expect.equality(#notified > 0, true)
-      MiniTest.expect.equality(notified[1].msg:find("grep found no matches", 1, true) ~= nil, true)
-      MiniTest.expect.equality(notified[1].level, vim.log.levels.INFO)
-    end)
-  end)
-
-  vim.fn.executable = orig_executable
-  vim.system = orig_system
-  vim.schedule = orig_schedule
-
-  MiniTest.expect.equality(ok, true)
-  MiniTest.expect.equality(err, nil)
-end
-
-T["fallback grep uses async git grep when ripgrep is unavailable"] = function()
-  local slots = {
-    [1] = {
-      raw = "foo",
-      pattern = "\\V\\C\\<foo\\>",
-      hl_group = "PinWord1",
-      whole_word = true,
-      case_sensitive = true,
-    },
-    [2] = {
-      raw = "bar",
-      pattern = "\\V\\cbar",
-      hl_group = "PinWord2",
-      whole_word = false,
-      case_sensitive = false,
-    },
-  }
-
-  local captured = { argvs = {} }
-  local stdout_by_term = {
-    foo = "lua/a.lua:2:5:has foo here\n",
-    bar = "lua/b.lua:1:1:bar at start\n",
-  }
-
-  local orig_executable = vim.fn.executable
-  local orig_system = vim.system
-  local orig_schedule = vim.schedule
-  local orig_setqflist = vim.fn.setqflist
-  local orig_nvim_cmd = vim.api.nvim_cmd
-  local orig_fs_root = vim.fs.root
-
-  vim.fn.executable = function(bin)
-    return bin == "git" and 1 or 0
-  end
-  vim.fs.root = function()
-    return "/repo"
-  end
-  vim.system = function(argv, opts, on_exit)
-    captured.argvs[#captured.argvs + 1] = argv
-    captured.opts = opts
-    if on_exit then
-      on_exit({ code = 0, stdout = stdout_by_term[argv[#argv]] or "", stderr = "" })
-    end
-    return {}
-  end
-  vim.schedule = function(fn)
-    fn()
-  end
-  vim.fn.setqflist = function(_list, action, what)
-    captured.action = action
-    captured.what = what
-  end
-  vim.api.nvim_cmd = function(cmd, opts)
-    captured.command = cmd
-    captured.command_opts = opts
-  end
-
-  local ok, err = pcall(function()
-    grep._fallback_grep(slots, nil)
-  end)
-
-  vim.fn.executable = orig_executable
-  vim.system = orig_system
-  vim.schedule = orig_schedule
-  vim.fn.setqflist = orig_setqflist
-  vim.api.nvim_cmd = orig_nvim_cmd
-  vim.fs.root = orig_fs_root
-
-  MiniTest.expect.equality(ok, true)
-  MiniTest.expect.equality(err, nil)
-
-  -- One invocation per slot, each carrying its own whole-word/case flags.
-  MiniTest.expect.equality(#captured.argvs, 2)
-  MiniTest.expect.equality(captured.argvs[1], {
-    "git",
-    "grep",
-    "--no-color",
-    "-I",
-    "-n",
-    "--column",
-    "--untracked",
-    "--exclude-standard",
-    "-F",
-    "-w",
-    "-e",
-    "foo",
-  })
-  MiniTest.expect.equality(captured.argvs[2], {
-    "git",
-    "grep",
-    "--no-color",
-    "-I",
-    "-n",
-    "--column",
-    "--untracked",
-    "--exclude-standard",
-    "-F",
-    "-i",
-    "-e",
-    "bar",
-  })
-  MiniTest.expect.equality(captured.opts.text, true)
-
-  -- Per-entry matches are merged and sorted into a single quickfix list.
-  MiniTest.expect.equality(captured.action, " ")
-  MiniTest.expect.equality(captured.what.title, "pinwords grep")
-  MiniTest.expect.equality(#captured.what.items, 2)
-  MiniTest.expect.equality(captured.what.items[1].filename, "lua/a.lua")
-  MiniTest.expect.equality(captured.what.items[2].filename, "lua/b.lua")
-  MiniTest.expect.equality(captured.command, { cmd = "copen" })
-end
-
-T["fallback grep reports no matches when git grep finds nothing"] = function()
-  local slots = {
-    [1] = {
-      raw = "zzz",
-      pattern = "\\V\\czzz",
-      hl_group = "PinWord1",
-      whole_word = false,
-      case_sensitive = false,
-    },
-  }
-
-  local orig_executable = vim.fn.executable
-  local orig_system = vim.system
-  local orig_schedule = vim.schedule
-  local orig_fs_root = vim.fs.root
-
-  vim.fn.executable = function(bin)
-    return bin == "git" and 1 or 0
-  end
-  vim.fs.root = function()
-    return "/repo"
-  end
-  vim.system = function(_argv, _opts, on_exit)
-    if on_exit then
-      on_exit({ code = 1, stdout = "", stderr = "" })
-    end
-    return {}
-  end
-  vim.schedule = function(fn)
-    fn()
-  end
-
-  local ok, err = pcall(function()
-    helpers.with_notify_override(function(notified)
-      grep._fallback_grep(slots, nil)
-      MiniTest.expect.equality(#notified > 0, true)
-      MiniTest.expect.equality(notified[#notified].msg:find("grep found no matches", 1, true) ~= nil, true)
-      MiniTest.expect.equality(notified[#notified].level, vim.log.levels.INFO)
-    end)
-  end)
-
-  vim.fn.executable = orig_executable
-  vim.system = orig_system
-  vim.schedule = orig_schedule
-  vim.fs.root = orig_fs_root
-
-  MiniTest.expect.equality(ok, true)
-  MiniTest.expect.equality(err, nil)
-end
-
-T["grep boundaries follow the saved pattern, not the current iskeyword"] = function()
-  -- Pattern saved without a leading boundary (pinned as `-foo`): widening
-  -- iskeyword afterwards must not add one back.
-  local slots = {
-    [1] = {
-      raw = "-foo",
-      pattern = "\\V\\C-foo\\>",
-      hl_group = "PinWord1",
-      whole_word = true,
-      case_sensitive = true,
-    },
-  }
-
-  local saved_iskeyword = vim.bo.iskeyword
-  vim.bo.iskeyword = saved_iskeyword .. ",-"
-
-  local rg_pattern = grep.build_rg_pattern(slots, nil)
-  local vim_pattern = grep.build_vim_pattern(slots, nil)
-
-  vim.bo.iskeyword = saved_iskeyword
-
-  MiniTest.expect.equality(rg_pattern, "-foo\\b")
-  MiniTest.expect.equality(vim_pattern, "\\V\\C-foo\\>")
-end
-
-T["grep omits ripgrep boundaries that ripgrep cannot satisfy"] = function()
-  -- Pinned in a buffer where `-` was a keyword character, so the saved pattern
-  -- has boundaries on both ends; ripgrep's \b can never match next to `-`.
-  local slots = {
-    [1] = {
-      raw = "-foo-",
-      pattern = "\\V\\C\\<-foo-\\>",
-      hl_group = "PinWord1",
-      whole_word = true,
-      case_sensitive = true,
-    },
-  }
-
-  MiniTest.expect.equality(grep.build_rg_pattern(slots, nil), "-foo-")
-  MiniTest.expect.equality(grep.build_vim_pattern(slots, nil), "\\V\\C\\<-foo-\\>")
-end
-
-T["git grep fallback enforces one-sided boundaries on its results"] = function()
-  local slots = {
-    [1] = {
-      raw = "-foo",
-      pattern = "\\V\\C-foo\\>",
-      hl_group = "PinWord1",
-      whole_word = true,
-      case_sensitive = true,
-    },
-  }
-
-  local captured = { argvs = {} }
-  local stdout = table.concat({
-    "lua/a.lua:1:3:x -foo y",
-    "lua/b.lua:2:1:-foobar",
-    "lua/c.lua:3:1:-foobar and -foo",
-  }, "\n") .. "\n"
-
-  local orig_executable = vim.fn.executable
-  local orig_system = vim.system
-  local orig_schedule = vim.schedule
-  local orig_setqflist = vim.fn.setqflist
-  local orig_nvim_cmd = vim.api.nvim_cmd
-  local orig_fs_root = vim.fs.root
-
-  vim.fn.executable = function(bin)
-    return bin == "git" and 1 or 0
-  end
-  vim.fs.root = function()
-    return "/repo"
-  end
-  vim.system = function(argv, _opts, on_exit)
-    captured.argvs[#captured.argvs + 1] = argv
-    if on_exit then
-      on_exit({ code = 0, stdout = stdout, stderr = "" })
-    end
-    return {}
-  end
-  vim.schedule = function(fn)
-    fn()
-  end
-  vim.fn.setqflist = function(_list, _action, what)
-    captured.what = what
-  end
-  vim.api.nvim_cmd = function(_cmd, _opts) end
-
-  local ok, err = pcall(function()
-    grep._fallback_grep(slots, nil)
-  end)
-
-  vim.fn.executable = orig_executable
-  vim.system = orig_system
-  vim.schedule = orig_schedule
-  vim.fn.setqflist = orig_setqflist
-  vim.api.nvim_cmd = orig_nvim_cmd
-  vim.fs.root = orig_fs_root
-
-  MiniTest.expect.equality(ok, true)
-  MiniTest.expect.equality(err, nil)
-
-  -- `-w` would demand a boundary on the `-` side, so it must not be passed.
-  MiniTest.expect.equality(vim.tbl_contains(captured.argvs[1], "-w"), false)
-
-  local items = captured.what.items
-  MiniTest.expect.equality(#items, 2)
-  MiniTest.expect.equality(items[1].filename, "lua/a.lua")
-  MiniTest.expect.equality(items[1].col, 3)
-  -- "-foobar" alone is rejected; the line that also contains a bounded "-foo"
-  -- is kept with the column moved to that occurrence.
-  MiniTest.expect.equality(items[2].filename, "lua/c.lua")
-  MiniTest.expect.equality(items[2].col, 13)
-end
-
-T["grep drops backend boundaries at non-ASCII endpoints"] = function()
-  -- Pinned where the multibyte characters were keyword characters, so the saved
-  -- pattern has boundaries ripgrep's \b cannot be trusted to satisfy.
-  local slots = {
-    [1] = {
-      raw = "\228\184\128foo\228\184\128",
-      pattern = "\\V\\C\\<\228\184\128foo\228\184\128\\>",
-      hl_group = "PinWord1",
-      whole_word = true,
-      case_sensitive = true,
-    },
-  }
-
-  MiniTest.expect.equality(grep.build_rg_pattern(slots, nil), "\\b\228\184\128foo\228\184\128\\b")
-  MiniTest.expect.equality(grep.build_vim_pattern(slots, nil), "\\V\\C\\<\228\184\128foo\228\184\128\\>")
-end
-
-T["git grep results are verified with the slot pattern even when -w was used"] = function()
-  local slots = {
-    [1] = {
-      raw = "foo",
-      pattern = "\\V\\C\\<foo\\>",
-      hl_group = "PinWord1",
-      whole_word = true,
-      case_sensitive = true,
-    },
-  }
-
-  local captured = { argvs = {} }
-  -- The second line could only come back from a stale or looser backend match;
-  -- verification with `\V\C\<foo\>` drops it.
-  local stdout = table.concat({
-    "lua/a.lua:1:1:foo bar",
-    "lua/b.lua:2:1:xfoo bar",
-  }, "\n") .. "\n"
-
-  local orig_executable = vim.fn.executable
-  local orig_system = vim.system
-  local orig_schedule = vim.schedule
-  local orig_setqflist = vim.fn.setqflist
-  local orig_nvim_cmd = vim.api.nvim_cmd
-  local orig_fs_root = vim.fs.root
-
-  vim.fn.executable = function(bin)
-    return bin == "git" and 1 or 0
-  end
-  vim.fs.root = function()
-    return "/repo"
-  end
-  vim.system = function(argv, _opts, on_exit)
-    captured.argvs[#captured.argvs + 1] = argv
-    if on_exit then
-      on_exit({ code = 0, stdout = stdout, stderr = "" })
-    end
-    return {}
-  end
-  vim.schedule = function(fn)
-    fn()
-  end
-  vim.fn.setqflist = function(_list, _action, what)
-    captured.what = what
-  end
-  vim.api.nvim_cmd = function(_cmd, _opts) end
-
-  local ok = pcall(function()
-    grep._fallback_grep(slots, nil)
-  end)
-
-  vim.fn.executable = orig_executable
-  vim.system = orig_system
-  vim.schedule = orig_schedule
-  vim.fn.setqflist = orig_setqflist
-  vim.api.nvim_cmd = orig_nvim_cmd
-  vim.fs.root = orig_fs_root
-
-  MiniTest.expect.equality(ok, true)
-  MiniTest.expect.equality(vim.tbl_contains(captured.argvs[1], "-w"), true)
-  MiniTest.expect.equality(#captured.what.items, 1)
-  MiniTest.expect.equality(captured.what.items[1].filename, "lua/a.lua")
-end
-
-T["ripgrep fallback results are verified against the slot pattern"] = function()
-  local slots = {
-    [1] = {
-      raw = "foo",
-      pattern = "\\V\\C\\<foo\\>",
-      hl_group = "PinWord1",
-      whole_word = true,
-      case_sensitive = true,
-    },
-  }
-
-  local captured = {}
-  local stdout = table.concat({
-    "lua/a.lua:1:3:x foo y",
-    "lua/b.lua:2:1:xfoo y",
-  }, "\n") .. "\n"
-
-  local orig_executable = vim.fn.executable
-  local orig_system = vim.system
-  local orig_schedule = vim.schedule
-  local orig_setqflist = vim.fn.setqflist
-  local orig_nvim_cmd = vim.api.nvim_cmd
-
-  vim.fn.executable = function(bin)
-    return bin == "rg" and 1 or 0
-  end
-  vim.system = function(argv, _opts, on_exit)
-    captured.argv = argv
-    if on_exit then
-      on_exit({ code = 0, stdout = stdout, stderr = "" })
-    end
-    return {}
-  end
-  vim.schedule = function(fn)
-    fn()
-  end
-  vim.fn.setqflist = function(_list, _action, what)
-    captured.what = what
-  end
-  vim.api.nvim_cmd = function(_cmd, _opts) end
-
-  local ok = pcall(function()
-    grep._fallback_grep(slots, nil)
-  end)
-
-  vim.fn.executable = orig_executable
-  vim.system = orig_system
-  vim.schedule = orig_schedule
-  vim.fn.setqflist = orig_setqflist
-  vim.api.nvim_cmd = orig_nvim_cmd
-
-  MiniTest.expect.equality(ok, true)
-  MiniTest.expect.equality(captured.argv[#captured.argv], "\\bfoo\\b")
-  MiniTest.expect.equality(#captured.what.items, 1)
-  MiniTest.expect.equality(captured.what.items[1].filename, "lua/a.lua")
-  MiniTest.expect.equality(captured.what.items[1].col, 3)
-end
-
-T["verification keeps multibyte neighbours and case-folded matches, in order"] = function()
-  local slots = {
-    -- Whole-word slot whose results sit next to multibyte punctuation.
-    [1] = {
-      raw = "foo",
-      pattern = "\\V\\C\\<foo\\>",
-      hl_group = "PinWord1",
-      whole_word = true,
-      case_sensitive = true,
-    },
-    -- Case-insensitive slot with a non-ASCII letter.
-    [2] = {
-      raw = "\195\132",
-      pattern = "\\V\\c\195\132",
-      hl_group = "PinWord2",
-      whole_word = false,
-      case_sensitive = false,
-    },
-  }
-
-  local captured = {}
-  local stdout = table.concat({
-    "lua/z.lua:5:2:\227\128\140foo\227\128\141",
-    "lua/a.lua:1:1:\195\164 lower",
-    "lua/b.lua:2:1:xfoo",
-  }, "\n") .. "\n"
-
-  local orig_executable = vim.fn.executable
-  local orig_system = vim.system
-  local orig_schedule = vim.schedule
-  local orig_setqflist = vim.fn.setqflist
-  local orig_nvim_cmd = vim.api.nvim_cmd
-
-  vim.fn.executable = function(bin)
-    return bin == "rg" and 1 or 0
-  end
-  vim.system = function(_argv, _opts, on_exit)
-    if on_exit then
-      on_exit({ code = 0, stdout = stdout, stderr = "" })
-    end
-    return {}
-  end
-  vim.schedule = function(fn)
-    fn()
-  end
-  vim.fn.setqflist = function(_list, _action, what)
-    captured.what = what
-  end
-  vim.api.nvim_cmd = function(_cmd, _opts) end
-
-  local ok = pcall(function()
-    grep._fallback_grep(slots, nil)
-  end)
-
-  vim.fn.executable = orig_executable
-  vim.system = orig_system
-  vim.schedule = orig_schedule
-  vim.fn.setqflist = orig_setqflist
-  vim.api.nvim_cmd = orig_nvim_cmd
-
-  MiniTest.expect.equality(ok, true)
-
-  local items = captured.what.items
-  MiniTest.expect.equality(#items, 2)
-  -- ripgrep's output order is preserved rather than reordered per slot.
-  MiniTest.expect.equality(items[1].filename, "lua/z.lua")
-  MiniTest.expect.equality(items[2].filename, "lua/a.lua")
-end
-
-T["ripgrep boundaries are dropped next to emoji but kept next to letters"] = function()
-  local emoji_slots = {
-    [1] = {
-      raw = "\240\159\152\128foo",
-      pattern = "\\V\\C\\<\240\159\152\128foo\\>",
-      hl_group = "PinWord1",
-      whole_word = true,
-      case_sensitive = true,
-    },
-  }
-  -- ripgrep does not count emoji as word characters, so a leading \\b could never
-  -- match; the trailing one still can.
-  MiniTest.expect.equality(grep.build_rg_pattern(emoji_slots, nil), "\240\159\152\128foo\\b")
-
-  local letter_slots = {
-    [1] = {
-      raw = "\195\132foo",
-      pattern = "\\V\\C\\<\195\132foo\\>",
-      hl_group = "PinWord1",
-      whole_word = true,
-      case_sensitive = true,
-    },
-  }
-  MiniTest.expect.equality(grep.build_rg_pattern(letter_slots, nil), "\\b\195\132foo\\b")
-end
-
-T["verification keeps every match on a line at its own column"] = function()
-  local slots = {
-    [1] = {
-      raw = "foo",
-      pattern = "\\V\\C\\<foo\\>",
-      hl_group = "PinWord1",
-      whole_word = true,
-      case_sensitive = true,
-    },
-  }
-
-  local captured = {}
-  -- rg --vimgrep reports one result per match, so both columns must survive.
-  local stdout = table.concat({
-    "lua/a.lua:1:1:foo and foo",
-    "lua/a.lua:1:9:foo and foo",
-  }, "\n") .. "\n"
-
-  local orig_executable = vim.fn.executable
-  local orig_system = vim.system
-  local orig_schedule = vim.schedule
-  local orig_setqflist = vim.fn.setqflist
-  local orig_nvim_cmd = vim.api.nvim_cmd
-
-  vim.fn.executable = function(bin)
-    return bin == "rg" and 1 or 0
-  end
-  vim.system = function(_argv, _opts, on_exit)
-    if on_exit then
-      on_exit({ code = 0, stdout = stdout, stderr = "" })
-    end
-    return {}
-  end
-  vim.schedule = function(fn)
-    fn()
-  end
-  vim.fn.setqflist = function(_list, _action, what)
-    captured.what = what
-  end
-  vim.api.nvim_cmd = function(_cmd, _opts) end
-
-  local ok = pcall(function()
-    grep._fallback_grep(slots, nil)
-  end)
-
-  vim.fn.executable = orig_executable
-  vim.system = orig_system
-  vim.schedule = orig_schedule
-  vim.fn.setqflist = orig_setqflist
-  vim.api.nvim_cmd = orig_nvim_cmd
-
-  MiniTest.expect.equality(ok, true)
-  MiniTest.expect.equality(#captured.what.items, 2)
-  MiniTest.expect.equality(captured.what.items[1].col, 1)
-  MiniTest.expect.equality(captured.what.items[2].col, 9)
-end
-
-T["verification enforces boundaries a slot pinned under another iskeyword"] = function()
-  -- Saved with `-` as a keyword character, so `\\<-foo\\>` matches nothing here;
-  -- verification still enforces "no keyword character before the match".
-  local slots = {
-    [1] = {
-      raw = "-foo",
-      pattern = "\\V\\C\\<-foo\\>",
-      hl_group = "PinWord1",
-      whole_word = true,
-      case_sensitive = true,
-    },
-  }
-
-  local captured = {}
-  local stdout = table.concat({
-    "lua/a.lua:1:2:x-foo",
-    "lua/b.lua:2:3:x -foo y",
-  }, "\n") .. "\n"
-
-  local orig_executable = vim.fn.executable
-  local orig_system = vim.system
-  local orig_schedule = vim.schedule
-  local orig_setqflist = vim.fn.setqflist
-  local orig_nvim_cmd = vim.api.nvim_cmd
-
-  vim.fn.executable = function(bin)
-    return bin == "rg" and 1 or 0
-  end
-  vim.system = function(_argv, _opts, on_exit)
-    if on_exit then
-      on_exit({ code = 0, stdout = stdout, stderr = "" })
-    end
-    return {}
-  end
-  vim.schedule = function(fn)
-    fn()
-  end
-  vim.fn.setqflist = function(_list, _action, what)
-    captured.what = what
-  end
-  vim.api.nvim_cmd = function(_cmd, _opts) end
-
-  local ok = pcall(function()
-    grep._fallback_grep(slots, nil)
-  end)
-
-  vim.fn.executable = orig_executable
-  vim.system = orig_system
-  vim.schedule = orig_schedule
-  vim.fn.setqflist = orig_setqflist
-  vim.api.nvim_cmd = orig_nvim_cmd
-
-  MiniTest.expect.equality(ok, true)
-  MiniTest.expect.equality(#captured.what.items, 1)
-  MiniTest.expect.equality(captured.what.items[1].filename, "lua/b.lua")
-  MiniTest.expect.equality(captured.what.items[1].col, 3)
-end
-
-T["grep warns once about multi-line pins when falling back"] = function()
-  helpers.setup_buffer({ "foo bar", "baz qux" })
-
-  local orig_executable = vim.fn.executable
-  local orig_system = vim.system
-  local orig_schedule = vim.schedule
-  local orig_setqflist = vim.fn.setqflist
-  local orig_nvim_cmd = vim.api.nvim_cmd
-
-  vim.fn.executable = function(bin)
-    return bin == "rg" and 1 or 0
-  end
-  vim.system = function(_argv, _opts, on_exit)
-    if on_exit then
-      on_exit({ code = 1, stdout = "", stderr = "" })
-    end
-    return {}
-  end
-  vim.schedule = function(fn)
-    fn()
-  end
-  vim.fn.setqflist = function(_list, _action, _what) end
-  vim.api.nvim_cmd = function(_cmd, _opts) end
-
-  local pinwords = require("pinwords")
-  pinwords.setup({
-    telescope = { enabled = false },
-    snacks = { enabled = false },
-    fzf_lua = { enabled = false },
-  })
-  pinwords.set(1, { raw = "foo", whole_word = false })
-  pinwords.set(2, { raw = "foo\nbaz", whole_word = false })
-
-  local skip_warnings = 0
-  helpers.with_notify_override(function(notified)
-    pinwords.grep()
-    for _, entry in ipairs(notified) do
-      if entry.msg:find("skipped", 1, true) then
-        skip_warnings = skip_warnings + 1
-      end
-    end
-  end)
-
-  vim.fn.executable = orig_executable
-  vim.system = orig_system
-  vim.schedule = orig_schedule
-  vim.fn.setqflist = orig_setqflist
-  vim.api.nvim_cmd = orig_nvim_cmd
-
-  MiniTest.expect.equality(skip_warnings, 1)
-end
-
-T["fallback grep passes the pattern after -e so leading dashes are safe"] = function()
-  local slots = {
-    [1] = {
-      raw = "-foo",
-      pattern = "\\V\\C-foo",
-      hl_group = "PinWord1",
-      whole_word = false,
-      case_sensitive = true,
-    },
-  }
-
-  local captured = {}
-  local orig_executable = vim.fn.executable
-  local orig_system = vim.system
-  local orig_schedule = vim.schedule
-  local orig_setqflist = vim.fn.setqflist
-  local orig_nvim_cmd = vim.api.nvim_cmd
-
-  vim.fn.executable = function(bin)
-    return bin == "rg" and 1 or 0
-  end
-  vim.system = function(argv, _opts, on_exit)
-    captured.argv = argv
-    if on_exit then
-      on_exit({ code = 1, stdout = "", stderr = "" })
-    end
-    return {}
-  end
-  vim.schedule = function(fn)
-    fn()
-  end
-  vim.fn.setqflist = function(_list, _action, _what) end
-  vim.api.nvim_cmd = function(_cmd, _opts) end
-
-  helpers.with_notify_override(function(_notified)
-    grep._fallback_grep(slots, nil)
-  end)
-
-  vim.fn.executable = orig_executable
-  vim.system = orig_system
-  vim.schedule = orig_schedule
-  vim.fn.setqflist = orig_setqflist
-  vim.api.nvim_cmd = orig_nvim_cmd
-
-  MiniTest.expect.equality(captured.argv[#captured.argv - 1], "-e")
-  MiniTest.expect.equality(captured.argv[#captured.argv], "-foo")
-end
-
-T["fallback grep drops results from superseded and torn-down runs"] = function()
-  local slots = {
-    [1] = {
-      raw = "foo",
-      pattern = "\\V\\Cfoo",
-      hl_group = "PinWord1",
-      whole_word = false,
-      case_sensitive = true,
-    },
-  }
-
-  local pending = {}
-  local opened = 0
-  local orig_executable = vim.fn.executable
-  local orig_system = vim.system
-  local orig_schedule = vim.schedule
-  local orig_setqflist = vim.fn.setqflist
-  local orig_nvim_cmd = vim.api.nvim_cmd
-
-  vim.fn.executable = function(bin)
-    return bin == "rg" and 1 or 0
-  end
-  vim.system = function(_argv, _opts, on_exit)
-    pending[#pending + 1] = on_exit
-    return {}
-  end
-  vim.schedule = function(fn)
-    fn()
-  end
-  vim.fn.setqflist = function(_list, _action, _what) end
-  vim.api.nvim_cmd = function(cmd, _opts)
-    if cmd.cmd == "copen" then
-      opened = opened + 1
-    end
-  end
-
-  local stale_notified = 0
-  helpers.with_notify_override(function(notified)
-    grep._fallback_grep(slots, nil)
-    grep._fallback_grep(slots, nil)
-
-    -- The first (now superseded) run completes last; its results are dropped.
-    pending[2]({ code = 0, stdout = "lua/a.lua:1:1:foo\n", stderr = "" })
-    pending[1]({ code = 0, stdout = "lua/b.lua:1:1:foo\n", stderr = "" })
-
-    -- After teardown, even the newest in-flight run stops touching quickfix.
-    grep._fallback_grep(slots, nil)
-    grep.teardown()
-    pending[3]({ code = 0, stdout = "lua/c.lua:1:1:foo\n", stderr = "" })
-
-    stale_notified = #notified
-  end)
-
-  vim.fn.executable = orig_executable
-  vim.system = orig_system
-  vim.schedule = orig_schedule
-  vim.fn.setqflist = orig_setqflist
-  vim.api.nvim_cmd = orig_nvim_cmd
-
-  MiniTest.expect.equality(opened, 1)
-  MiniTest.expect.equality(stale_notified, 0)
-end
-
-T["a later picker-backed grep invalidates an in-flight fallback run"] = function()
-  helpers.setup_buffer({ "foo bar" })
-
-  local slots = {
-    [1] = {
-      raw = "foo",
-      pattern = "\\V\\Cfoo",
-      hl_group = "PinWord1",
-      whole_word = false,
-      case_sensitive = true,
-    },
-  }
-
-  local pending
-  local opened = 0
-  local orig_executable = vim.fn.executable
-  local orig_system = vim.system
-  local orig_schedule = vim.schedule
-  local orig_setqflist = vim.fn.setqflist
-  local orig_nvim_cmd = vim.api.nvim_cmd
-
-  vim.fn.executable = function(bin)
-    return bin == "rg" and 1 or 0
-  end
-  vim.system = function(_argv, _opts, on_exit)
-    pending = on_exit
-    return {}
-  end
-  vim.schedule = function(fn)
-    fn()
-  end
-  vim.fn.setqflist = function(_list, _action, _what) end
-  vim.api.nvim_cmd = function(cmd, _opts)
-    if cmd.cmd == "copen" then
-      opened = opened + 1
-    end
-  end
-
-  local fzf_stub = {
-    grep = function(_opts) end,
-    live_grep = function(_opts) end,
-  }
-
-  local pinwords = require("pinwords")
-  with_loaded_module("fzf-lua", fzf_stub, function()
-    with_loaded_module("pinwords.fzf_lua", nil, function()
-      grep._fallback_grep(slots, nil)
-
-      -- The next search is served by a picker, so it must still supersede the
-      -- fallback that is still running.
-      pinwords.setup({
-        telescope = { enabled = false },
-        snacks = { enabled = false },
-        fzf_lua = { enabled = true },
-      })
-      pinwords.set(1, { raw = "foo" })
-      pinwords.grep()
-
-      pending({ code = 0, stdout = "lua/a.lua:1:1:foo\n", stderr = "" })
-    end)
-  end)
-
-  vim.fn.executable = orig_executable
-  vim.system = orig_system
-  vim.schedule = orig_schedule
-  vim.fn.setqflist = orig_setqflist
-  vim.api.nvim_cmd = orig_nvim_cmd
-
-  MiniTest.expect.equality(opened, 0)
 end
 
 return T

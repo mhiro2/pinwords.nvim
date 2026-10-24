@@ -3,34 +3,89 @@ local helpers = require("tests.test_helpers")
 
 local T = helpers.create_test_set()
 
-T["setup validates options and never errors"] = function()
-  local pinwords = require("pinwords")
-  local orig_notify = vim.notify
-  local notified = {}
-  vim.notify = function(msg, level, opts)
-    table.insert(notified, { msg = msg, level = level, opts = opts })
+---@param tbl table
+---@param path string[]
+---@return any
+local function get_path(tbl, path)
+  local value = tbl
+  for _, key in ipairs(path) do
+    value = value[key]
   end
+  return value
+end
 
-  local ok = pcall(pinwords.setup, {
-    slots = "9",
-    whole_word = "yes",
-    case_sensitive = 1,
-    auto_allocation = {
-      strategy = "unknown",
-      on_full = "unknown",
-      toggle_same = "yes",
+---Run setup with opts and assert it emits exactly the expected warnings and leaves the
+---listed config fields at the expected values.
+---@param opts any
+---@param warnings string[]
+---@param expected table<string, any> dotted config path => value
+local function expect_sanitized(opts, warnings, expected)
+  local pinwords = require("pinwords")
+
+  helpers.with_notify_override(function(notified)
+    local ok = pcall(pinwords.setup, opts)
+    MiniTest.expect.equality(ok, true)
+
+    local messages = {}
+    for _, n in ipairs(notified) do
+      MiniTest.expect.equality(n.level, vim.log.levels.WARN)
+      messages[#messages + 1] = n.msg
+    end
+    local expected_messages = {}
+    for _, warning in ipairs(warnings) do
+      expected_messages[#expected_messages + 1] = "pinwords: " .. warning
+    end
+    MiniTest.expect.equality(messages, expected_messages)
+  end)
+
+  local cfg = pinwords.get_config()
+  for path, value in pairs(expected) do
+    MiniTest.expect.equality(get_path(cfg, vim.split(path, ".", { plain = true })), value)
+  end
+end
+
+T["setup falls back to the default for each invalid option"] = function()
+  local cases = {
+    {
+      opts = { slots = "9", whole_word = false },
+      warning = "slots must be a positive integer; fallback to default",
+      expected = { slots = 9, whole_word = false },
     },
-  })
+    {
+      opts = { slots = 0, case_sensitive = true },
+      warning = "slots must be a positive integer; fallback to default",
+      expected = { slots = 9, case_sensitive = true },
+    },
+    {
+      opts = { whole_word = "yes", slots = 4 },
+      warning = "whole_word must be boolean; fallback to default",
+      expected = { whole_word = true, slots = 4 },
+    },
+    {
+      opts = { case_sensitive = 1, slots = 4 },
+      warning = "case_sensitive must be boolean; fallback to default",
+      expected = { case_sensitive = false, slots = 4 },
+    },
+    {
+      opts = { auto_allocation = { strategy = "unknown", on_full = "no_op" } },
+      warning = "auto_allocation.strategy must be one of: first_empty, cycle, lru; fallback to default",
+      expected = { ["auto_allocation.strategy"] = "first_empty", ["auto_allocation.on_full"] = "no_op" },
+    },
+    {
+      opts = { auto_allocation = { on_full = "unknown", strategy = "lru" } },
+      warning = "auto_allocation.on_full must be one of: replace_oldest, replace_last, no_op; fallback to default",
+      expected = { ["auto_allocation.on_full"] = "replace_oldest", ["auto_allocation.strategy"] = "lru" },
+    },
+    {
+      opts = { auto_allocation = { toggle_same = "yes", strategy = "cycle" } },
+      warning = "auto_allocation.toggle_same must be boolean; fallback to default",
+      expected = { ["auto_allocation.toggle_same"] = true, ["auto_allocation.strategy"] = "cycle" },
+    },
+  }
 
-  vim.notify = orig_notify
-
-  MiniTest.expect.equality(ok, true)
-  MiniTest.expect.equality(#notified > 0, true)
-
-  -- It should still work after invalid setup.
-  helpers.setup_buffer({ "foo bar", "baz" })
-  ok = pcall(pinwords.set, 1)
-  MiniTest.expect.equality(ok, true)
+  for _, case in ipairs(cases) do
+    expect_sanitized(case.opts, { case.warning }, case.expected)
+  end
 end
 
 T["setup with fewer slots prunes existing slots and matches"] = function()
@@ -48,32 +103,15 @@ T["setup with fewer slots prunes existing slots and matches"] = function()
   MiniTest.expect.equality(helpers.find_match("PinWord3"), nil)
 end
 
-T["setup validates colors with hex string"] = function()
-  local pinwords = require("pinwords")
-  local notified = {}
-  local orig_notify = vim.notify
-  vim.notify = function(msg, level, _opts)
-    table.insert(notified, { msg = msg, level = level })
-  end
-
+T["setup keeps a valid hex slot color and applies it"] = function()
   helpers.clear_hl("PinWord1")
-  local ok = pcall(pinwords.setup, {
-    colors = {
-      [1] = "#ff0000",
-    },
-  })
-  vim.notify = orig_notify
+  helpers.with_normal_bg(0x000000, function()
+    expect_sanitized({ colors = { [1] = "#ff0000" } }, {}, { colors = { [1] = "#ff0000" } })
 
-  MiniTest.expect.equality(ok, true)
-  -- No warnings for valid hex
-  local has_color_warning = false
-  for _, n in ipairs(notified) do
-    if n.msg:match("colors") then
-      has_color_warning = true
-    end
-  end
-  MiniTest.expect.equality(has_color_warning, false)
-
+    -- #ff0000 blended half-way into the black Normal background.
+    local hl = vim.api.nvim_get_hl(0, { name = "PinWord1", link = false })
+    MiniTest.expect.equality(hl.bg, 0x800000)
+  end)
   helpers.clear_hl("PinWord1")
 end
 
@@ -103,32 +141,15 @@ T["setup warns on invalid hex color"] = function()
   MiniTest.expect.equality(has_color_warning, true)
 end
 
-T["setup validates colors table with bg"] = function()
-  local pinwords = require("pinwords")
-  local notified = {}
-  local orig_notify = vim.notify
-  vim.notify = function(msg, level, _opts)
-    table.insert(notified, { msg = msg, level = level })
-  end
-
+T["setup keeps a valid bg and fg color table and applies it"] = function()
   helpers.clear_hl("PinWord1")
-  local ok = pcall(pinwords.setup, {
-    colors = {
-      [1] = { bg = "#00ff00", fg = "#000000" },
-    },
-  })
-  vim.notify = orig_notify
+  local color = { bg = "#00ff00", fg = "#000000" }
+  expect_sanitized({ colors = { [1] = color } }, {}, { colors = { [1] = color } })
 
-  MiniTest.expect.equality(ok, true)
-
-  local has_color_warning = false
-  for _, n in ipairs(notified) do
-    if n.msg:match("colors") then
-      has_color_warning = true
-    end
-  end
-  MiniTest.expect.equality(has_color_warning, false)
-
+  -- An explicit fg disables blending, so bg is applied as given.
+  local hl = vim.api.nvim_get_hl(0, { name = "PinWord1", link = false })
+  MiniTest.expect.equality(hl.bg, 0x00ff00)
+  MiniTest.expect.equality(hl.fg, 0x000000)
   helpers.clear_hl("PinWord1")
 end
 
@@ -210,61 +231,25 @@ T["setup warns on invalid sp in table"] = function()
   MiniTest.expect.equality(has_warning, true)
 end
 
-T["setup accepts valid sp in table"] = function()
-  local pinwords = require("pinwords")
-  local notified = {}
-  local orig_notify = vim.notify
-  vim.notify = function(msg, level, _opts)
-    table.insert(notified, { msg = msg, level = level })
-  end
-
+T["setup keeps a valid sp in table and applies it"] = function()
   helpers.clear_hl("PinWord1")
-  local ok = pcall(pinwords.setup, {
-    colors = {
-      [1] = { sp = "#ff0000", undercurl = true },
-    },
-  })
-  vim.notify = orig_notify
+  local color = { sp = "#ff0000", undercurl = true }
+  expect_sanitized({ colors = { [1] = color } }, {}, { colors = { [1] = color } })
 
-  MiniTest.expect.equality(ok, true)
-
-  local has_color_warning = false
-  for _, n in ipairs(notified) do
-    if n.msg:match("colors") then
-      has_color_warning = true
-    end
-  end
-  MiniTest.expect.equality(has_color_warning, false)
-
+  local hl = vim.api.nvim_get_hl(0, { name = "PinWord1", link = false })
+  MiniTest.expect.equality(hl.sp, 0xff0000)
+  MiniTest.expect.equality(hl.undercurl, true)
   helpers.clear_hl("PinWord1")
 end
 
-T["setup validates cword color"] = function()
-  local pinwords = require("pinwords")
-  local notified = {}
-  local orig_notify = vim.notify
-  vim.notify = function(msg, level, _opts)
-    table.insert(notified, { msg = msg, level = level })
-  end
-
+T["setup keeps a valid cword color and applies it"] = function()
   helpers.clear_hl("PinWordCword")
-  local ok = pcall(pinwords.setup, {
-    colors = {
-      cword = "#ffff00",
-    },
-  })
-  vim.notify = orig_notify
+  helpers.with_normal_bg(0x000000, function()
+    expect_sanitized({ colors = { cword = "#ffff00" } }, {}, { colors = { cword = "#ffff00" } })
 
-  MiniTest.expect.equality(ok, true)
-
-  local has_color_warning = false
-  for _, n in ipairs(notified) do
-    if n.msg:match("cword") and n.msg:match("hex") then
-      has_color_warning = true
-    end
-  end
-  MiniTest.expect.equality(has_color_warning, false)
-
+    local hl = vim.api.nvim_get_hl(0, { name = "PinWordCword", link = false })
+    MiniTest.expect.equality(hl.bg, 0x808000)
+  end)
   helpers.clear_hl("PinWordCword")
 end
 
@@ -323,12 +308,16 @@ T["setup warns on non-integer ctermfg"] = function()
   helpers.clear_hl("PinWord1")
 end
 
-T["setup accepts valid cterm colors and style booleans"] = function()
+T["setup keeps boundary cterm colors and false style booleans"] = function()
   helpers.clear_hl("PinWord1")
-  local notified = setup_capturing_warnings({
-    colors = { [1] = { ctermbg = 0, ctermfg = 255, bold = true, underline = false } },
-  })
-  MiniTest.expect.equality(notified_matches(notified, "colors"), false)
+  local color = { ctermbg = 0, ctermfg = 255, bold = true, underline = false }
+  expect_sanitized({ colors = { [1] = color } }, {}, { colors = { [1] = color } })
+
+  local hl = vim.api.nvim_get_hl(0, { name = "PinWord1", link = false })
+  MiniTest.expect.equality(hl.ctermbg, 0)
+  MiniTest.expect.equality(hl.ctermfg, 255)
+  MiniTest.expect.equality(hl.bold, true)
+  MiniTest.expect.equality(hl.underline, nil)
   helpers.clear_hl("PinWord1")
 end
 
@@ -367,28 +356,43 @@ T["setup warns on non-table colors"] = function()
   MiniTest.expect.equality(has_warning, true)
 end
 
-T["setup validates flash config values"] = function()
-  local pinwords = require("pinwords")
+T["setup falls back to the default for each invalid flash option"] = function()
+  local cases = {
+    {
+      flash = { enabled = "yes", timeout_ms = 10 },
+      warning = "flash.enabled must be boolean; fallback to default",
+      expected = { ["flash.enabled"] = true, ["flash.timeout_ms"] = 10 },
+    },
+    {
+      flash = { timeout_ms = -1, enabled = false },
+      warning = "flash.timeout_ms must be a non-negative integer; fallback to default",
+      expected = { ["flash.timeout_ms"] = 120, ["flash.enabled"] = false },
+    },
+    {
+      flash = { timeout_ms = 1.5, priority = 10 },
+      warning = "flash.timeout_ms must be a non-negative integer; fallback to default",
+      expected = { ["flash.timeout_ms"] = 120, ["flash.priority"] = 10 },
+    },
+    {
+      flash = { hl_group = 1, priority = 10 },
+      warning = "flash.hl_group must be a non-empty string; fallback to default",
+      expected = { ["flash.hl_group"] = "PinWordFlash", ["flash.priority"] = 10 },
+    },
+    {
+      flash = { hl_group = "", timeout_ms = 10 },
+      warning = "flash.hl_group must be a non-empty string; fallback to default",
+      expected = { ["flash.hl_group"] = "PinWordFlash", ["flash.timeout_ms"] = 10 },
+    },
+    {
+      flash = { priority = 1.5, hl_group = "Search" },
+      warning = "flash.priority must be an integer; fallback to default",
+      expected = { ["flash.priority"] = 250, ["flash.hl_group"] = "Search" },
+    },
+  }
 
-  helpers.with_notify_override(function(notified)
-    local ok = pcall(pinwords.setup, {
-      flash = {
-        enabled = "yes",
-        timeout_ms = -1,
-        hl_group = 1,
-        priority = 1.5,
-      },
-    })
-    MiniTest.expect.equality(ok, true)
-
-    local has_warning = false
-    for _, n in ipairs(notified) do
-      if n.msg:match("flash%.") then
-        has_warning = true
-      end
-    end
-    MiniTest.expect.equality(has_warning, true)
-  end)
+  for _, case in ipairs(cases) do
+    expect_sanitized({ flash = case.flash }, { case.warning }, case.expected)
+  end
 end
 
 T["setup accepts flash timeout_ms zero"] = function()
@@ -408,60 +412,20 @@ T["setup accepts flash timeout_ms zero"] = function()
   MiniTest.expect.equality(pinwords.get_config().flash.timeout_ms, 0)
 end
 
-T["setup with non-table opts does not crash"] = function()
+T["setup with non-table opts falls back to the default config"] = function()
   local pinwords = require("pinwords")
+  local defaults = require("pinwords.config").default_config()
 
-  helpers.with_notify_override(function(notified)
-    local ok = pcall(pinwords.setup, "invalid")
-    MiniTest.expect.equality(ok, true)
+  for _, opts in ipairs({ "invalid", 42, true }) do
+    expect_sanitized(opts, { "setup opts must be a table; fallback to default" }, {})
+    MiniTest.expect.equality(pinwords.get_config(), defaults)
 
-    local has_warning = false
-    for _, n in ipairs(notified) do
-      if n.msg:match("setup opts must be a table") then
-        has_warning = true
-      end
-    end
-    MiniTest.expect.equality(has_warning, true)
-  end)
-
-  -- Should still work after invalid setup
-  helpers.setup_buffer({ "foo bar" })
-  local ok = pcall(pinwords.set, 1)
-  MiniTest.expect.equality(ok, true)
-end
-
-T["setup with numeric opts does not crash"] = function()
-  local pinwords = require("pinwords")
-
-  helpers.with_notify_override(function(notified)
-    local ok = pcall(pinwords.setup, 42)
-    MiniTest.expect.equality(ok, true)
-
-    local has_warning = false
-    for _, n in ipairs(notified) do
-      if n.msg:match("setup opts must be a table") then
-        has_warning = true
-      end
-    end
-    MiniTest.expect.equality(has_warning, true)
-  end)
-end
-
-T["setup with boolean opts does not crash"] = function()
-  local pinwords = require("pinwords")
-
-  helpers.with_notify_override(function(notified)
-    local ok = pcall(pinwords.setup, true)
-    MiniTest.expect.equality(ok, true)
-
-    local has_warning = false
-    for _, n in ipairs(notified) do
-      if n.msg:match("setup opts must be a table") then
-        has_warning = true
-      end
-    end
-    MiniTest.expect.equality(has_warning, true)
-  end)
+    helpers.setup_buffer({ "foo bar" })
+    pinwords.set(1)
+    MiniTest.expect.equality(pinwords.list()[1].pattern, "\\V\\c\\<foo\\>")
+    MiniTest.expect.equality(helpers.find_match("PinWord1").pattern, "\\V\\c\\<foo\\>")
+    pinwords.clear_all()
+  end
 end
 
 return T

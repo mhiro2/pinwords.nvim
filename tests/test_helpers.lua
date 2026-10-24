@@ -93,6 +93,13 @@ function M.feed_normal(keys)
   vim.cmd(string.format('execute "normal! %s"', keys))
 end
 
+---Feed keys through the typeahead so mode changes and command-line events fire
+---as they do for real input.
+---@param keys string Key notation, e.g. "vll:PinWord<CR>"
+function M.feed_keys(keys)
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(keys, true, false, true), "xt", false)
+end
+
 ---@return integer
 function M.match_count()
   local count = 0
@@ -108,6 +115,98 @@ end
 ---@param name string
 function M.clear_hl(name)
   vim.cmd("hi clear " .. name)
+end
+
+---Run func with a fixed Normal background so blended highlight colors are deterministic.
+---@param bg integer
+---@param func function
+function M.with_normal_bg(bg, func)
+  local orig_normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
+  vim.api.nvim_set_hl(0, "Normal", { bg = bg })
+
+  local ok, err = pcall(func)
+  vim.api.nvim_set_hl(0, "Normal", orig_normal)
+
+  if not ok then
+    error(err)
+  end
+end
+
+---Record what happens to every timer created by vim.uv.new_timer while func
+---runs. The returned records keep updating after func returns, so a timer that
+---is stopped or closed later is still observed.
+---@param func function
+---@return { delays: integer[], stopped: boolean, closed: boolean }[]
+function M.spy_timers(func)
+  local records = {}
+  local orig_new_timer = vim.uv.new_timer
+
+  vim.uv.new_timer = function()
+    local timer = orig_new_timer()
+    local record = { delays = {}, stopped = false, closed = false }
+    records[#records + 1] = record
+
+    return setmetatable({
+      start = function(_, delay, rep, cb)
+        record.delays[#record.delays + 1] = delay
+        return timer:start(delay, rep, cb)
+      end,
+      stop = function()
+        record.stopped = true
+        return timer:stop()
+      end,
+      close = function()
+        record.closed = true
+        return timer:close()
+      end,
+    }, {
+      __index = function(_, key)
+        return function(_, ...)
+          return timer[key](timer, ...)
+        end
+      end,
+    })
+  end
+
+  local ok, err = pcall(func)
+  vim.uv.new_timer = orig_new_timer
+
+  if not ok then
+    error(err)
+  end
+
+  return records
+end
+
+---Temporarily replace package.loaded[module_name] while fn runs.
+---@param module_name string
+---@param value any
+---@param fn fun()
+function M.with_loaded_module(module_name, value, fn)
+  local previous = package.loaded[module_name]
+  package.loaded[module_name] = value
+
+  local ok, err = pcall(fn)
+  package.loaded[module_name] = previous
+
+  if not ok then
+    error(err)
+  end
+end
+
+---Replace vim.ui.select while fn runs and restore it even when fn fails.
+---@param select fun(items: any[], opts: table, on_choice: fun(item: any|nil))
+---@param fn fun()
+function M.with_select_override(select, fn)
+  local orig_select = vim.ui.select
+  vim.ui.select = select
+
+  local ok, err = pcall(fn)
+  vim.ui.select = orig_select
+
+  if not ok then
+    error(err)
+  end
 end
 
 ---@param func function

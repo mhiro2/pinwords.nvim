@@ -3,56 +3,26 @@ local helpers = require("tests.test_helpers")
 
 local T = helpers.create_test_set()
 
-T["pattern with whole_word true uses word boundaries"] = function()
-  helpers.setup_buffer({ "foo bar", "foobar" })
+T["pattern matches special characters literally"] = function()
+  helpers.setup_buffer({ "foo.bar" })
 
-  require("pinwords").set(1, { whole_word = true })
+  local pinwords = require("pinwords")
+  local cases = {
+    { raw = "foo.bar", hit = "x foo.bar y", misses = { "x fooXbar y" } },
+    { raw = "foo*bar", hit = "x foo*bar y", misses = { "x foobar y", "x fooobar y" } },
+    { raw = "a\\b", hit = "x a\\b y", misses = { "x ab y", "x a\bb y" } },
+    { raw = "foo\rbar", hit = "x foo\rbar y", misses = { "x foorbar y", "x foo\\rbar y" } },
+  }
 
-  local match = helpers.find_match("PinWord1")
-  MiniTest.expect.equality(match ~= nil, true)
-  MiniTest.expect.equality(match.pattern:match("\\<") ~= nil, true)
-  MiniTest.expect.equality(match.pattern:match("\\>") ~= nil, true)
-end
+  for slot, case in ipairs(cases) do
+    pinwords.set(slot, { raw = case.raw })
 
-T["pattern with whole_word false does not use word boundaries"] = function()
-  helpers.setup_buffer({ "foo bar", "foobar" })
-
-  require("pinwords").set(1, { whole_word = false })
-
-  local match = helpers.find_match("PinWord1")
-  MiniTest.expect.equality(match ~= nil, true)
-  MiniTest.expect.equality(match.pattern:match("\\<"), nil)
-end
-
-T["pattern with case_sensitive true is case sensitive"] = function()
-  helpers.setup_buffer({ "Foo bar", "foo baz" })
-
-  require("pinwords").set(1, { case_sensitive = true })
-
-  local match = helpers.find_match("PinWord1")
-  MiniTest.expect.equality(match ~= nil, true)
-  MiniTest.expect.equality(match.pattern:match("\\C") ~= nil, true)
-end
-
-T["pattern with case_sensitive false is case insensitive"] = function()
-  helpers.setup_buffer({ "Foo bar", "foo baz" })
-
-  require("pinwords").set(1, { case_sensitive = false })
-
-  local match = helpers.find_match("PinWord1")
-  MiniTest.expect.equality(match ~= nil, true)
-  MiniTest.expect.equality(match.pattern:match("\\c") ~= nil, true)
-end
-
-T["pattern escapes special characters"] = function()
-  helpers.setup_buffer({ "foo.bar", "foo*bar" })
-
-  require("pinwords").set(1, { raw = "foo.bar" })
-
-  local match = helpers.find_match("PinWord1")
-  MiniTest.expect.equality(match ~= nil, true)
-  -- Pattern should escape the dot
-  MiniTest.expect.equality(match.pattern:match("foo%.bar") ~= nil, true)
+    local match = helpers.find_match("PinWord" .. slot)
+    MiniTest.expect.equality(vim.fn.match(case.hit, match.pattern), 2)
+    for _, miss in ipairs(case.misses) do
+      MiniTest.expect.equality(vim.fn.match(miss, match.pattern), -1)
+    end
+  end
 end
 
 T["pattern escapes newlines in multi-line text"] = function()
