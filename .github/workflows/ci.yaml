@@ -10,6 +10,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 defaults:
   run:
     shell: bash -euo pipefail {0}
@@ -17,9 +20,12 @@ defaults:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - name: Run StyLua check
         uses: JohnnyMorganz/stylua-action@v5.0.0
         with:
@@ -33,7 +39,7 @@ jobs:
           sha256sum --check "selene-${SELENE_VERSION}-linux.zip.checksum"
           unzip "selene-${SELENE_VERSION}-linux.zip"
           install -Dp selene "$HOME/.local/bin/selene"
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
         env:
           SELENE_VERSION: "0.29.0"
           SHA256_CHECKSUM: "e2510f91826373dafb77e741b2df826ecfe4b94dfb20f8939809773ee4d53b6d"
@@ -42,8 +48,7 @@ jobs:
 
   actions-lock:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
@@ -60,6 +65,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       matrix:
         nvim_version:
@@ -68,6 +74,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - name: Set up Neovim
         uses: rhysd/action-setup-vim@v1.6.1
         with:
