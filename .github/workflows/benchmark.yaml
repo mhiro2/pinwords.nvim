@@ -8,8 +8,7 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
-permissions:
-  pull-requests: write
+permissions: {}
 
 defaults:
   run:
@@ -18,9 +17,14 @@ defaults:
 jobs:
   bench:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pull-requests: write
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - name: Set up Neovim
         uses: rhysd/action-setup-vim@v1.6.1
         with:
