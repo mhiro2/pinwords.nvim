@@ -41,8 +41,8 @@ jobs:
           install -Dp selene "$HOME/.local/bin/selene"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
         env:
-          SELENE_VERSION: "0.29.0"
-          SHA256_CHECKSUM: "e2510f91826373dafb77e741b2df826ecfe4b94dfb20f8939809773ee4d53b6d"
+          SELENE_VERSION: "0.31.0"
+          SHA256_CHECKSUM: "dac452422747999ec4919bbb8bb52992b66aae533b60022bf005669de8616671"
       - name: Run Selene
         run: make selene
 
